@@ -273,13 +273,9 @@ button:disabled {
 
 .start {
   display: flex;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
   flex-wrap: wrap;
-}
-
-.start .name-input {
-  flex: 1 1 14rem;
-  border-radius: 999px;
 }
 
 .hint {
@@ -316,55 +312,42 @@ button:disabled {
   font-weight: 500;
 }
 
-/* ---------- leaderboard ---------- */
+/* ---------- start and personal best ---------- */
 
-.board {
-  margin-top: 2.75rem;
-  text-align: left;
+.btn-big {
+  padding: 0.9rem 1.6rem;
+  font-size: 1.05rem;
 }
 
-.board h2 {
-  margin: 0 0 0.6rem;
+.best {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.best-label {
   font-size: 0.72rem;
-  font-weight: 400;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.board ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--line);
-}
-
-.board li {
-  display: grid;
-  grid-template-columns: 2rem 1fr auto;
-  gap: 0.5rem;
-  padding: 0.55rem 0.25rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.board li.is-you {
-  color: var(--accent);
-}
-
-.board-rank {
-  color: var(--muted);
+.best b {
   font-family: var(--mono);
-}
-
-.board-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-score {
-  font-family: var(--mono);
+  font-size: 1.25rem;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.best-meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.eyebrow.is-record {
+  color: var(--accent);
 }
 
 /* ---------- round ---------- */

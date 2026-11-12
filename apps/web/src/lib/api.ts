@@ -1,6 +1,6 @@
 import type {
   GuessResult,
-  LeaderboardEntry,
+  PoolSummary,
   PoolTrack,
   ProfileState,
   RoundState,
@@ -30,16 +30,13 @@ const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) });
 
 export const api = {
-  pool: () => request<PoolTrack[]>("/pool"),
+  poolSummary: () => request<PoolSummary>("/pool/summary"),
   runPool: (runId: string) => request<PoolTrack[]>(`/runs/${runId}/pool`),
-  createRun: (nickname?: string, profileId?: string | null) =>
-    post<RunState>("/runs", { nickname, profileId: profileId ?? undefined }),
+  createRun: (profileId?: string | null) => post<RunState>("/runs", { profileId: profileId ?? undefined }),
   getRun: (runId: string) => request<RunState>(`/runs/${runId}`),
   unlock: (roundId: string, seconds: number) => post<RoundState>(`/rounds/${roundId}/unlock`, { seconds }),
   guess: (roundId: string, trackId: string) => post<GuessResult>(`/rounds/${roundId}/guess`, { trackId }),
   giveUp: (roundId: string) => post<GuessResult>(`/rounds/${roundId}/give-up`),
-  leaderboard: (profileId?: string | null) =>
-    request<LeaderboardEntry[]>(`/leaderboard?limit=10${profileId ? `&profileId=${encodeURIComponent(profileId)}` : ""}`),
   profiles: () => request<ProfileState[]>("/profiles"),
   profile: (id: string) => request<ProfileState>(`/profiles/${id}`),
   importProfile: (username: string, refresh = false) => post<ProfileState>("/profiles", { username, refresh }),

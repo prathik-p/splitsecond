@@ -11,6 +11,11 @@ export class GameController {
     return this.game.pool();
   }
 
+  @Get("pool/summary")
+  poolSummary() {
+    return this.game.poolSummary();
+  }
+
   @Post("runs")
   createRun(@Body() body: { nickname?: string; profileId?: string } = {}) {
     return this.game.createRun(body?.nickname, body?.profileId);

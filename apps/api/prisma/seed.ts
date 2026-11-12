@@ -1,14 +1,26 @@
 /**
- * Fill the song pool from Deezer: the global chart plus any playlists in
- * SEED_PLAYLISTS (comma-separated Deezer playlist ids). Safe to re-run.
+ * Fill the song pool from Deezer. Safe to re-run; it only adds and updates.
  *
  *   pnpm db:seed
- *   SEED_PLAYLISTS=1234567,7654321 pnpm db:seed
+ *
+ * By default this adds the current chart plus the hits of every year from
+ * 2000 to now (60 per year), found through Deezer playlists named after each
+ * year. Only song details are stored; audio is fetched from Deezer per round.
+ *
+ * Settings (environment, or apps/api/.env):
+ *   HITS_FROM=2000  HITS_TO=2026  HITS_PER_YEAR=60   (HITS_PER_YEAR=0 skips the yearly hits)
+ *   SEED_PLAYLISTS=1234567,7654321                   extra Deezer playlists to add as they are
+ *
+ * To hand-pick the playlists for a year, list their ids in
+ * prisma/hit-playlists.json, e.g. { "2005": ["1234567", "7654321"] }.
  */
 import "dotenv/config";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { songKey } from "@splitsecond/shared";
 import { DeezerClient, DeezerTrack } from "../src/deezer/deezer-client";
+import { seedHits } from "../src/catalog/hits-seeder";
 
 const prisma = new PrismaClient();
 const deezer = new DeezerClient(process.env.DEEZER_API_BASE || "https://api.deezer.com");
@@ -84,8 +96,21 @@ async function main() {
     }
   }
 
+  console.log(`Saved ${saved} chart and playlist songs.`);
+
+  const perYear = Number(process.env.HITS_PER_YEAR ?? 60);
+  if (perYear > 0) {
+    const fromYear = Number(process.env.HITS_FROM) || 2000;
+    const toYear = Number(process.env.HITS_TO) || new Date().getFullYear();
+    const pinnedFile = join(__dirname, "hit-playlists.json");
+    const pinned = existsSync(pinnedFile) ? JSON.parse(readFileSync(pinnedFile, "utf8")) : {};
+    console.log(`Finding the hits of ${fromYear} to ${toYear}, ${perYear} per year. This takes a few minutes…`);
+    const hits = await seedHits(prisma, deezer, { fromYear, toYear, perYear, pinned, log: (m) => console.log(`  ${m}`) });
+    console.log(`Saved ${hits.saved} hits.`);
+  }
+
   const total = await prisma.track.count({ where: { inPool: true } });
-  console.log(`Saved ${saved} songs. The pool now has ${total}.`);
+  console.log(`The pool now has ${total} songs.`);
 }
 
 main()

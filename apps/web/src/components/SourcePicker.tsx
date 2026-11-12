@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { RUN_LENGTH, type ProfileState } from "@splitsecond/shared";
+import { RUN_LENGTH, type PoolSummary, type ProfileState } from "@splitsecond/shared";
 
 interface Props {
-  /** Songs in the default pool, or null while loading. */
-  chartSize: number | null;
+  /** What the default pool holds, or null while loading. */
+  hits: PoolSummary | null;
   profiles: ProfileState[];
   /** Selected profile id, or null for the default pool. */
   selectedId: string | null;
@@ -24,8 +24,8 @@ function describe(p: ProfileState): string {
   return songs(p.matched);
 }
 
-/** Choose where a run's songs come from: the charts, or a Last.fm listener's own music. */
-export function SourcePicker({ chartSize, profiles, selectedId, onSelect, onImport }: Props) {
+/** Choose where a run's songs come from: the hits pool, or a Last.fm listener's own music. */
+export function SourcePicker({ hits, profiles, selectedId, onSelect, onImport }: Props) {
   const [username, setUsername] = useState("");
   const [adding, setAdding] = useState(false);
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
@@ -40,10 +40,10 @@ export function SourcePicker({ chartSize, profiles, selectedId, onSelect, onImpo
 
   let note: React.ReactNode = null;
   if (!selected) {
-    if (chartSize !== null && chartSize < RUN_LENGTH) {
+    if (hits !== null && hits.songs < RUN_LENGTH) {
       note = (
         <>
-          The chart pool is empty. Run <code>pnpm db:seed</code> to fill it from Deezer.
+          The song pool is empty. Run <code>pnpm db:seed</code> to fill it from Deezer.
         </>
       );
     }
@@ -71,8 +71,12 @@ export function SourcePicker({ chartSize, profiles, selectedId, onSelect, onImpo
           className={`source${selectedId === null ? " is-selected" : ""}`}
           onClick={() => onSelect(null)}
         >
-          <span className="source-name">Top charts</span>
-          <span className="source-meta">{chartSize === null ? "Loading…" : songs(chartSize)}</span>
+          <span className="source-name">
+            {hits?.yearFrom && hits.yearTo && hits.yearFrom !== hits.yearTo
+              ? `Hits ${hits.yearFrom}–${hits.yearTo}`
+              : "Top hits"}
+          </span>
+          <span className="source-meta">{hits === null ? "Loading…" : songs(hits.songs)}</span>
         </button>
         {profiles.map((p) => (
           <button

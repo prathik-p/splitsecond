@@ -13,7 +13,14 @@
  */
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { fakeMp3, mockDeezerHandler, mockLastfmHandler, MockLastfmUser, MockTrack } from "./fixtures";
+import {
+  fakeMp3,
+  mockDeezerHandler,
+  mockLastfmHandler,
+  MockLastfmUser,
+  MockPlaylist,
+  MockTrack,
+} from "./fixtures";
 
 const DEEZER_PORT = 4010;
 const LASTFM_PORT = 4011;
@@ -51,6 +58,11 @@ const deepCuts: [string, string][] = [
   ["Lisbon, Later", "Marlowe & Finch"],
   ["Pilot Light", "Pilot Season"],
 ];
+// Spread the chart songs over a few years, each year with two "hits" playlists,
+// so the by-year seed has something to find.
+const hitYears = [2001, 2004, 2008, 2012, 2016, 2019, 2022, 2025];
+const yearOf = (i: number) => hitYears[i % hitYears.length];
+
 const tracks: MockTrack[] = [...chart, ...deepCuts].map(([title, artist], i) => ({
   id: 700_000 + i,
   title,
@@ -58,7 +70,16 @@ const tracks: MockTrack[] = [...chart, ...deepCuts].map(([title, artist], i) => 
   rank: 950_000 - i * 35_000,
   isrc: `MOCK${String(i).padStart(8, "0")}`,
   chart: i < chart.length,
+  releaseDate: i < chart.length ? `${yearOf(i)}-05-01` : undefined,
 }));
+
+const playlists: MockPlaylist[] = hitYears.flatMap((year, y) => {
+  const trackIds = tracks.filter((t, i) => i < chart.length && yearOf(i) === year).map((t) => t.id);
+  return [
+    { id: 100 + y * 2, title: `Hits ${year}`, trackIds, nbTracks: 40 },
+    { id: 101 + y * 2, title: `Top ${year}`, trackIds, nbTracks: 40 },
+  ];
+});
 
 const users: MockLastfmUser[] = [
   {
@@ -86,7 +107,7 @@ const users: MockLastfmUser[] = [
   { name: "nobody", top: [] },
 ];
 
-const deezer = mockDeezerHandler(tracks, mp3, () => `http://127.0.0.1:${DEEZER_PORT}`);
+const deezer = mockDeezerHandler(tracks, mp3, () => `http://127.0.0.1:${DEEZER_PORT}`, undefined, playlists);
 createServer((req, res) => {
   if (delay && req.url?.startsWith("/search")) setTimeout(() => deezer(req, res), delay);
   else deezer(req, res);

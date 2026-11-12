@@ -3,6 +3,7 @@ import { Prisma, Round, RoundStatus, Track } from "@prisma/client";
 import {
   GuessResult,
   LeaderboardEntry,
+  PoolSummary,
   PoolTrack,
   RUN_LENGTH,
   RoundState,
@@ -51,6 +52,14 @@ export class GameService {
       out.push({ id: t.id, title: t.title, artist: t.artist });
     }
     return out.sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  async poolSummary(): Promise<PoolSummary> {
+    const [songs, years] = await Promise.all([
+      this.prisma.track.findMany({ where: { inPool: true }, distinct: ["songKey"], select: { id: true } }),
+      this.prisma.track.aggregate({ where: { inPool: true }, _min: { year: true }, _max: { year: true } }),
+    ]);
+    return { songs: songs.length, yearFrom: years._min.year, yearTo: years._max.year };
   }
 
   async runPool(runId: string): Promise<PoolTrack[]> {
@@ -289,6 +298,7 @@ function toRoundState(round: RoundWithTrack): RoundState {
           artist: round.track.artist,
           album: round.track.album,
           coverUrl: round.track.coverUrl,
+          year: round.track.year,
         }
       : null,
   };

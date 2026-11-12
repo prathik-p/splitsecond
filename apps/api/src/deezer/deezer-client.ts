@@ -16,8 +16,17 @@ export interface DeezerTrack {
   duration: number;
   preview: string;
   readable?: boolean;
+  /** "YYYY-MM-DD", only on the single-track endpoint. */
+  release_date?: string;
   artist: { id: number; name: string };
   album: { id: number; title: string; cover_medium?: string };
+}
+
+export interface DeezerPlaylist {
+  id: number;
+  title: string;
+  nb_tracks: number;
+  public?: boolean;
 }
 
 interface DeezerList<T> {
@@ -65,6 +74,13 @@ export class DeezerClient {
       index += page.data.length;
     }
     return out.slice(0, max);
+  }
+
+  async searchPlaylists(query: string, limit = 25): Promise<DeezerPlaylist[]> {
+    const res = await this.get<DeezerList<DeezerPlaylist>>(
+      `/search/playlist?q=${encodeURIComponent(query)}&limit=${limit}`,
+    );
+    return res.data ?? [];
   }
 
   /** Candidates for a song by title and artist: a strict field search, then a loose one. */

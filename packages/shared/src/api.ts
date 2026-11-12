@@ -6,6 +6,14 @@ export interface PoolTrack {
   artist: string;
 }
 
+/** What the default pool holds, for the lobby. */
+export interface PoolSummary {
+  songs: number;
+  /** Range of hit years in the pool, or null if no song has a year. */
+  yearFrom: number | null;
+  yearTo: number | null;
+}
+
 export interface RoundState {
   roundId: string;
   index: number;
@@ -22,6 +30,7 @@ export interface RevealedTrack {
   artist: string;
   album: string | null;
   coverUrl: string | null;
+  year: number | null;
 }
 
 export interface ProfileState {

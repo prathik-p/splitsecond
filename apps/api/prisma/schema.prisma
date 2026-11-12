@@ -19,6 +19,8 @@ model Track {
   coverUrl   String?
   /// Deezer popularity rank. Higher is more popular, so easier.
   rank       Int
+  /// The year the song was a hit, when it came from a by-year seed.
+  year       Int?
   /// Normalised "title::artist", used to treat re-releases as the same song.
   songKey    String
   inPool     Boolean  @default(true)

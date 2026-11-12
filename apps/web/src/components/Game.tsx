@@ -8,20 +8,20 @@ import {
   basePoints,
   formatSeconds,
   scoreRound,
-  type LeaderboardEntry,
+  type PoolSummary,
   type PoolTrack,
   type ProfileState,
   type RoundState,
   type RunState,
 } from "@splitsecond/shared";
 import { api } from "@/lib/api";
+import { HITS, getBest, recordRun, type Best } from "@/lib/best";
 import { SnippetPlayer, type LoadedClip } from "@/lib/snippet-player";
 import { Scrubber } from "./Scrubber";
 import { GuessInput } from "./GuessInput";
 import { SourcePicker } from "./SourcePicker";
 
 const RUN_KEY = "splitsecond.run";
-const NAME_KEY = "splitsecond.nickname";
 const SOURCE_KEY = "splitsecond.source";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -44,28 +44,26 @@ function store(key: string, value: string | null) {
 export function Game() {
   /** Songs that can be guessed in the current run. */
   const [pool, setPool] = useState<PoolTrack[] | null>(null);
-  /** Size of the default pool, for the lobby. */
-  const [chartSize, setChartSize] = useState<number | null>(null);
+  /** What the default pool holds, for the lobby. */
+  const [hits, setHits] = useState<PoolSummary | null>(null);
   const [profiles, setProfiles] = useState<ProfileState[]>([]);
   /** Selected profile id, or null for the default pool. */
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [run, setRun] = useState<RunState | null>(null);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [nickname, setNickname] = useState("");
+  /** True once we are in the browser, where the stored best can be read. */
+  const [mounted, setMounted] = useState(false);
+  /** How the run that just finished compares to the best before it. */
+  const [outcome, setOutcome] = useState<{ best: Best; isNew: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Index of the round on screen. Stays on a finished round until "Next". */
   const [viewIndex, setViewIndex] = useState(0);
 
-  const refreshLeaderboard = useCallback((profileId: string | null) => {
-    api.leaderboard(profileId).then(setLeaderboard).catch(() => {});
-  }, []);
-
   useEffect(() => {
-    setNickname(stored(NAME_KEY) ?? "");
+    setMounted(true);
     api
-      .pool()
-      .then((p) => setChartSize(p.length))
+      .poolSummary()
+      .then(setHits)
       .catch((e: Error) => setError(e.message));
     api
       .profiles()
@@ -88,9 +86,6 @@ export function Game() {
     }
   }, []);
 
-  // The leaderboard follows the selected source (or the current run's).
-  const boardSource = run ? (run.source?.profileId ?? null) : sourceId;
-  useEffect(() => refreshLeaderboard(boardSource), [boardSource, refreshLeaderboard]);
 
   // Each run has its own guessable songs.
   const runId = run?.runId;
@@ -140,10 +135,9 @@ export function Game() {
     setBusy(true);
     setError(null);
     try {
-      const name = nickname.trim();
-      store(NAME_KEY, name || null);
-      const r = await api.createRun(name || undefined, sourceId);
+      const r = await api.createRun(sourceId);
       store(RUN_KEY, r.runId);
+      setOutcome(null);
       setRun(r);
       setViewIndex(0);
     } catch (e) {
@@ -153,19 +147,18 @@ export function Game() {
     }
   };
 
-  const onRunChange = useCallback(
-    (r: RunState) => {
-      setRun(r);
-      if (r.finished) {
-        store(RUN_KEY, null);
-        refreshLeaderboard(r.source?.profileId ?? null);
-      }
-    },
-    [refreshLeaderboard],
-  );
+  const onRunChange = useCallback((r: RunState) => {
+    setRun(r);
+    if (r.finished) {
+      store(RUN_KEY, null);
+      setOutcome(recordRun(r.source?.profileId ?? HITS, r.runId, r.totalScore));
+    }
+  }, []);
 
   const selected = profiles.find((p) => p.id === sourceId) ?? null;
-  const playable = selected ? selected.status === "done" && selected.matched >= RUN_LENGTH : (chartSize ?? 0) >= RUN_LENGTH;
+  // Personal best for the selected source, read from this browser on each lobby render.
+  const best: Best | null = mounted && !run ? getBest(sourceId ?? HITS) : null;
+  const playable = selected ? selected.status === "done" && selected.matched >= RUN_LENGTH : (hits?.songs ?? 0) >= RUN_LENGTH;
 
   const round = run?.rounds[viewIndex];
   const showSummary = run && run.finished && viewIndex >= RUN_LENGTH;
@@ -214,18 +207,15 @@ export function Game() {
 
       {!run && (
         <Lobby
-          nickname={nickname}
-          onNickname={setNickname}
           onStart={start}
           busy={busy}
           playable={playable}
-          chartSize={chartSize}
+          hits={hits}
           profiles={profiles}
           sourceId={sourceId}
           onSelectSource={selectSource}
           onImport={importProfile}
-          leaderboard={leaderboard}
-          boardTitle={selected ? `Best runs on ${selected.displayName}'s songs` : "Best runs"}
+          best={best}
         />
       )}
 
@@ -248,7 +238,7 @@ export function Game() {
       {run && showSummary && (
         <Summary
           run={run}
-          leaderboard={leaderboard}
+          outcome={outcome}
           onAgain={() => {
             setRun(null);
             setViewIndex(0);
@@ -260,18 +250,15 @@ export function Game() {
 }
 
 function Lobby(props: {
-  nickname: string;
-  onNickname: (v: string) => void;
   onStart: () => void;
   busy: boolean;
   playable: boolean;
-  chartSize: number | null;
+  hits: PoolSummary | null;
   profiles: ProfileState[];
   sourceId: string | null;
   onSelectSource: (id: string | null) => void;
   onImport: (username: string, refresh?: boolean) => Promise<boolean>;
-  leaderboard: LeaderboardEntry[];
-  boardTitle: string;
+  best: Best | null;
 }) {
   return (
     <section className="lobby">
@@ -283,31 +270,35 @@ function Lobby(props: {
         moment costs points, and so does every wrong guess.
       </p>
       <SourcePicker
-        chartSize={props.chartSize}
+        hits={props.hits}
         profiles={props.profiles}
         selectedId={props.sourceId}
         onSelect={props.onSelectSource}
         onImport={props.onImport}
       />
-      <form
-        className="start"
-        onSubmit={(e) => {
-          e.preventDefault();
-          props.onStart();
-        }}
-      >
-        <input
-          className="name-input"
-          value={props.nickname}
-          onChange={(e) => props.onNickname(e.target.value)}
-          maxLength={24}
-          placeholder="Name for the leaderboard (optional)"
-          aria-label="Name for the leaderboard"
-        />
-        <button className="btn btn-primary" type="submit" disabled={props.busy || !props.playable}>
+      <div className="start">
+        <button
+          className="btn btn-primary btn-big"
+          type="button"
+          onClick={props.onStart}
+          disabled={props.busy || !props.playable}
+        >
           {props.busy ? "Starting…" : "Start a run"}
         </button>
-      </form>
+        <p className="best" data-testid="best">
+          {props.best ? (
+            <>
+              <span className="best-label">Your best</span>
+              <b>{fmt(props.best.score)}</b>
+              <span className="best-meta">
+                {props.best.runs} {props.best.runs === 1 ? "run" : "runs"} played
+              </span>
+            </>
+          ) : (
+            <span className="best-meta">No runs yet. Your best score is kept on this device.</span>
+          )}
+        </p>
+      </div>
       <ul className="rules">
         <li>
           <b>{fmt(basePoints(0.1))}</b> points at {formatSeconds(0.1)}
@@ -322,33 +313,6 @@ function Lobby(props: {
           <b>−{WRONG_GUESS_PENALTY}</b> per wrong guess
         </li>
       </ul>
-      <Leaderboard entries={props.leaderboard} title={props.boardTitle} />
-    </section>
-  );
-}
-
-function Leaderboard({
-  entries,
-  highlight,
-  title = "Best runs",
-}: {
-  entries: LeaderboardEntry[];
-  highlight?: string;
-  title?: string;
-}) {
-  if (entries.length === 0) return null;
-  return (
-    <section className="board">
-      <h2>{title}</h2>
-      <ol>
-        {entries.map((e, i) => (
-          <li key={e.runId} className={e.runId === highlight ? "is-you" : undefined}>
-            <span className="board-rank">{i + 1}</span>
-            <span className="board-name">{e.nickname}</span>
-            <span className="board-score">{fmt(e.totalScore)}</span>
-          </li>
-        ))}
-      </ol>
     </section>
   );
 }
@@ -558,7 +522,10 @@ function RoundView(props: {
               {round.status === "solved" ? `Got it at ${formatSeconds(round.unlockedSeconds)}` : "Not this time"}
             </p>
             <h2>{round.answer.title}</h2>
-            <p className="reveal-artist">{round.answer.artist}</p>
+            <p className="reveal-artist">
+              {round.answer.artist}
+              {round.answer.year ? ` · ${round.answer.year}` : ""}
+            </p>
             <p className="reveal-score">
               <b>+{fmt(round.score ?? 0)}</b>
               {round.wrongGuesses > 0 && round.status === "solved" && (
@@ -593,22 +560,26 @@ function RoundView(props: {
 
 function Summary({
   run,
-  leaderboard,
+  outcome,
   onAgain,
 }: {
   run: RunState;
-  leaderboard: LeaderboardEntry[];
+  outcome: { best: Best; isNew: boolean } | null;
   onAgain: () => void;
 }) {
   const solved = run.rounds.filter((r) => r.status === "solved").length;
+  const newBest = outcome?.isNew && run.totalScore > 0;
   return (
     <section className="summary">
-      <p className="eyebrow">Run complete</p>
+      <p className={`eyebrow${newBest ? " is-record" : ""}`} data-testid="verdict">
+        {newBest ? "New high score" : "Run complete"}
+      </p>
       <h1 className="summary-score" data-testid="final">
         {fmt(run.totalScore)}
       </h1>
       <p className="lede">
         {solved} of {RUN_LENGTH} songs named.
+        {outcome && !newBest && ` Your best is ${fmt(outcome.best.score)}.`}
       </p>
       <ol className="recap">
         {run.rounds.map((r) => (
@@ -624,11 +595,6 @@ function Summary({
       <button type="button" className="btn btn-primary" onClick={onAgain} autoFocus>
         Play again
       </button>
-      <Leaderboard
-        entries={leaderboard}
-        highlight={run.runId}
-        title={run.source ? `Best runs on ${run.source.displayName}'s songs` : "Best runs"}
-      />
     </section>
   );
 }

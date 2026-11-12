@@ -36,6 +36,16 @@ export interface MockTrack {
   isrc: string;
   /** false keeps the track out of the chart, so it is only reachable by search. */
   chart?: boolean;
+  /** "YYYY-MM-DD", served by /track/:id only, like Deezer. */
+  releaseDate?: string;
+}
+
+export interface MockPlaylist {
+  id: number;
+  title: string;
+  trackIds: number[];
+  /** Reported size; defaults to the real one. Lets a short fixture pass the size filter. */
+  nbTracks?: number;
 }
 
 export function mockDeezerHandler(
@@ -43,6 +53,7 @@ export function mockDeezerHandler(
   mp3: Buffer,
   baseUrl: () => string,
   stats = { trackLookups: 0, previewDownloads: 0, searches: 0 },
+  playlists: MockPlaylist[] = [],
 ) {
   return (req: IncomingMessage, res: ServerResponse) => {
     const base = baseUrl();
@@ -64,7 +75,29 @@ export function mockDeezerHandler(
       stats.trackLookups++;
       const t = tracks.find((x) => x.id === Number(trackMatch[1]));
       res.setHeader("content-type", "application/json");
-      return res.end(JSON.stringify(t ? json(t) : { error: { code: 800, message: "no data" } }));
+      return res.end(
+        JSON.stringify(t ? { ...json(t), release_date: t.releaseDate } : { error: { code: 800, message: "no data" } }),
+      );
+    }
+    if (url.pathname === "/search/playlist") {
+      const words = (url.searchParams.get("q") ?? "").toLowerCase().split(/\s+/);
+      const hits = playlists.filter((p) => words.every((w) => p.title.toLowerCase().includes(w)));
+      res.setHeader("content-type", "application/json");
+      return res.end(
+        JSON.stringify({
+          data: hits.map((p) => ({ id: p.id, title: p.title, nb_tracks: p.nbTracks ?? p.trackIds.length, public: true })),
+        }),
+      );
+    }
+    const playlistMatch = url.pathname.match(/^\/playlist\/(\d+)\/tracks$/);
+    if (playlistMatch) {
+      const p = playlists.find((x) => x.id === Number(playlistMatch[1]));
+      const data = (p?.trackIds ?? [])
+        .map((id) => tracks.find((t) => t.id === id))
+        .filter((t): t is MockTrack => !!t)
+        .map((t) => ({ ...json(t), isrc: undefined }));
+      res.setHeader("content-type", "application/json");
+      return res.end(JSON.stringify({ data, total: data.length }));
     }
     if (url.pathname === "/chart/0/tracks") {
       res.setHeader("content-type", "application/json");
@@ -95,10 +128,10 @@ export function mockDeezerHandler(
 }
 
 /** Start the stand-in on a free port, for tests. */
-export async function startMockDeezer(tracks: MockTrack[], mp3: Buffer) {
+export async function startMockDeezer(tracks: MockTrack[], mp3: Buffer, playlists: MockPlaylist[] = []) {
   const stats = { trackLookups: 0, previewDownloads: 0, searches: 0 };
   const url = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const server: Server = createServer(mockDeezerHandler(tracks, mp3, url, stats));
+  const server: Server = createServer(mockDeezerHandler(tracks, mp3, url, stats, playlists));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
     url: url(),
