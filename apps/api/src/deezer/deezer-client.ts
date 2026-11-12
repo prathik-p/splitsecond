@@ -67,6 +67,17 @@ export class DeezerClient {
     return out.slice(0, max);
   }
 
+  /** Candidates for a song by title and artist: a strict field search, then a loose one. */
+  async search(title: string, artist: string, limit = 8): Promise<DeezerTrack[]> {
+    const clean = (v: string) => v.replace(/"/g, " ").trim();
+    const strict = `artist:"${clean(artist)}" track:"${clean(title)}"`;
+    const res = await this.get<DeezerList<DeezerTrack>>(`/search?q=${encodeURIComponent(strict)}&limit=${limit}`);
+    if (res.data?.length) return res.data;
+    const loose = `${clean(title)} ${clean(artist)}`;
+    const fallback = await this.get<DeezerList<DeezerTrack>>(`/search?q=${encodeURIComponent(loose)}&limit=${limit}`);
+    return fallback.data ?? [];
+  }
+
   /** Download the 30s preview MP3 for a track, using a freshly signed URL. */
   async previewMp3(id: number | bigint): Promise<Buffer> {
     const track = await this.track(id);

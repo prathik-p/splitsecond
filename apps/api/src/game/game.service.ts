@@ -14,7 +14,14 @@ import { PrismaService } from "../prisma/prisma.service";
 import { DeezerService } from "../deezer/deezer.service";
 import { sliceMp3 } from "../audio/mp3";
 
-type RoundWithTrack = Round & { track: Track };
+type RoundWithTrack = Round & { track: Track; run: { profiles: { id: string }[] } };
+
+const ROUND_INCLUDE = { track: true, run: { select: { profiles: { select: { id: true } } } } } as const;
+
+/** The songs a run can draw from and be guessed from: its profiles' songs, or the default pool. */
+function poolWhere(profileIds: string[]): Prisma.TrackWhereInput {
+  return profileIds.length ? { profiles: { some: { profileId: { in: profileIds } } } } : { inPool: true };
+}
 
 const STATUS: Record<RoundStatus, RoundState["status"]> = {
   PLAYING: "playing",
@@ -30,9 +37,9 @@ export class GameService {
   ) {}
 
   /** Every guessable song, one entry per song even if the pool has several releases. */
-  async pool(): Promise<PoolTrack[]> {
+  async pool(profileIds: string[] = []): Promise<PoolTrack[]> {
     const tracks = await this.prisma.track.findMany({
-      where: { inPool: true },
+      where: poolWhere(profileIds),
       select: { id: true, title: true, artist: true, songKey: true },
       orderBy: { rank: "desc" },
     });
@@ -46,19 +53,42 @@ export class GameService {
     return out.sort((a, b) => a.title.localeCompare(b.title));
   }
 
+  async runPool(runId: string): Promise<PoolTrack[]> {
+    const run = await this.prisma.run.findUnique({
+      where: { id: runId },
+      select: { profiles: { select: { id: true } } },
+    });
+    if (!run) throw new NotFoundException("Run not found");
+    return this.pool(run.profiles.map((p) => p.id));
+  }
+
   /**
    * Pick RUN_LENGTH songs from the pool, ordered easy to hard: the pool is
    * sorted by Deezer rank and split into RUN_LENGTH bands, one song per band.
+   * With a profile, the pool is that profile's imported songs.
    */
-  async createRun(nickname?: string | null): Promise<RunState> {
+  async createRun(nickname?: string | null, profileId?: string | null): Promise<RunState> {
+    let profile: { id: string; displayName: string } | null = null;
+    if (profileId) {
+      profile = await this.prisma.profile.findUnique({
+        where: { id: String(profileId) },
+        select: { id: true, displayName: true },
+      });
+      if (!profile) throw new NotFoundException("Profile not found");
+    }
+
     const pool = await this.prisma.track.findMany({
-      where: { inPool: true },
+      where: poolWhere(profile ? [profile.id] : []),
       select: { id: true, songKey: true },
       orderBy: { rank: "desc" },
     });
     const distinct = new Set(pool.map((t) => t.songKey));
     if (distinct.size < RUN_LENGTH) {
-      throw new ConflictException(`The song pool needs at least ${RUN_LENGTH} songs. Run the seed first.`);
+      throw new ConflictException(
+        profile
+          ? `${profile.displayName} needs at least ${RUN_LENGTH} matched songs to play.`
+          : `The song pool needs at least ${RUN_LENGTH} songs. Run the seed first.`,
+      );
     }
 
     const picked: string[] = [];
@@ -78,6 +108,7 @@ export class GameService {
     const run = await this.prisma.run.create({
       data: {
         nickname: clean,
+        ...(profile ? { profiles: { connect: { id: profile.id } } } : {}),
         rounds: { create: picked.map((trackId, index) => ({ trackId, index })) },
       },
     });
@@ -87,12 +118,17 @@ export class GameService {
   async getRun(runId: string): Promise<RunState> {
     const run = await this.prisma.run.findUnique({
       where: { id: runId },
-      include: { rounds: { include: { track: true }, orderBy: { index: "asc" } } },
+      include: {
+        rounds: { include: ROUND_INCLUDE, orderBy: { index: "asc" } },
+        profiles: { select: { id: true, displayName: true } },
+      },
     });
     if (!run) throw new NotFoundException("Run not found");
+    const [profile] = run.profiles;
     return {
       runId: run.id,
       nickname: run.nickname,
+      source: profile ? { profileId: profile.id, displayName: profile.displayName } : null,
       totalScore: run.totalScore,
       finished: run.finishedAt !== null,
       rounds: run.rounds.map(toRoundState),
@@ -108,7 +144,7 @@ export class GameService {
     const updated = await this.prisma.round.update({
       where: { id: round.id },
       data: { unlockedSeconds: next },
-      include: { track: true },
+      include: ROUND_INCLUDE,
     });
     return toRoundState(updated);
   }
@@ -127,7 +163,9 @@ export class GameService {
       throw new BadRequestException("trackId is required");
     }
     const round = await this.playableRound(roundId);
-    const guessed = await this.prisma.track.findFirst({ where: { id: guessedTrackId, inPool: true } });
+    const guessed = await this.prisma.track.findFirst({
+      where: { id: guessedTrackId, ...poolWhere(round.run.profiles.map((p) => p.id)) },
+    });
     if (!guessed) throw new BadRequestException("Pick a song from the list");
 
     const correct = guessed.songKey === round.track.songKey;
@@ -163,9 +201,13 @@ export class GameService {
     return this.result(false, round.id, round.runId);
   }
 
-  async leaderboard(limit = 20): Promise<LeaderboardEntry[]> {
+  /** Best finished runs on the default pool, or on one profile's songs. */
+  async leaderboard(limit = 20, profileId?: string): Promise<LeaderboardEntry[]> {
     const runs = await this.prisma.run.findMany({
-      where: { finishedAt: { not: null } },
+      where: {
+        finishedAt: { not: null },
+        profiles: profileId ? { some: { id: profileId } } : { none: {} },
+      },
       orderBy: [{ totalScore: "desc" }, { finishedAt: "asc" }],
       take: limit,
     });
@@ -211,7 +253,7 @@ export class GameService {
   }
 
   private async loadRound(roundId: string): Promise<RoundWithTrack> {
-    const round = await this.prisma.round.findUnique({ where: { id: roundId }, include: { track: true } });
+    const round = await this.prisma.round.findUnique({ where: { id: roundId }, include: ROUND_INCLUDE });
     if (!round) throw new NotFoundException("Round not found");
     return round;
   }

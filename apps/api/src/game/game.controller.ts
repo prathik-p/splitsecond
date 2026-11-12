@@ -5,14 +5,20 @@ import { GameService } from "./game.service";
 export class GameController {
   constructor(private readonly game: GameService) {}
 
+  /** The default pool's songs. A run's own songs are at runs/:id/pool. */
   @Get("pool")
   pool() {
     return this.game.pool();
   }
 
   @Post("runs")
-  createRun(@Body() body: { nickname?: string } = {}) {
-    return this.game.createRun(body?.nickname);
+  createRun(@Body() body: { nickname?: string; profileId?: string } = {}) {
+    return this.game.createRun(body?.nickname, body?.profileId);
+  }
+
+  @Get("runs/:id/pool")
+  runPool(@Param("id") id: string) {
+    return this.game.runPool(id);
   }
 
   @Get("runs/:id")
@@ -44,8 +50,8 @@ export class GameController {
   }
 
   @Get("leaderboard")
-  leaderboard(@Query("limit") limit?: string) {
+  leaderboard(@Query("limit") limit?: string, @Query("profileId") profileId?: string) {
     const n = Math.min(100, Math.max(1, Number(limit) || 20));
-    return this.game.leaderboard(n);
+    return this.game.leaderboard(n, profileId || undefined);
   }
 }

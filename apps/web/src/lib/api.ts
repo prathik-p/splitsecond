@@ -1,4 +1,11 @@
-import type { GuessResult, LeaderboardEntry, PoolTrack, RoundState, RunState } from "@splitsecond/shared";
+import type {
+  GuessResult,
+  LeaderboardEntry,
+  PoolTrack,
+  ProfileState,
+  RoundState,
+  RunState,
+} from "@splitsecond/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -24,12 +31,18 @@ const post = <T,>(path: string, body?: unknown) =>
 
 export const api = {
   pool: () => request<PoolTrack[]>("/pool"),
-  createRun: (nickname?: string) => post<RunState>("/runs", { nickname }),
+  runPool: (runId: string) => request<PoolTrack[]>(`/runs/${runId}/pool`),
+  createRun: (nickname?: string, profileId?: string | null) =>
+    post<RunState>("/runs", { nickname, profileId: profileId ?? undefined }),
   getRun: (runId: string) => request<RunState>(`/runs/${runId}`),
   unlock: (roundId: string, seconds: number) => post<RoundState>(`/rounds/${roundId}/unlock`, { seconds }),
   guess: (roundId: string, trackId: string) => post<GuessResult>(`/rounds/${roundId}/guess`, { trackId }),
   giveUp: (roundId: string) => post<GuessResult>(`/rounds/${roundId}/give-up`),
-  leaderboard: () => request<LeaderboardEntry[]>("/leaderboard?limit=10"),
+  leaderboard: (profileId?: string | null) =>
+    request<LeaderboardEntry[]>(`/leaderboard?limit=10${profileId ? `&profileId=${encodeURIComponent(profileId)}` : ""}`),
+  profiles: () => request<ProfileState[]>("/profiles"),
+  profile: (id: string) => request<ProfileState>(`/profiles/${id}`),
+  importProfile: (username: string, refresh = false) => post<ProfileState>("/profiles", { username, refresh }),
   async audio(roundId: string): Promise<ArrayBuffer> {
     const res = await fetch(`/api/rounds/${roundId}/audio`, { cache: "no-store" });
     if (!res.ok) throw new Error("Couldn't load the audio for this song");

@@ -69,6 +69,7 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     const run = await newRun();
     expect(run.rounds).toHaveLength(RUN_LENGTH);
     expect(run.nickname).toBe("tester");
+    expect(run.source).toBeNull();
     expect(run.rounds.every((r) => r.answer === null && r.status === "playing")).toBe(true);
     expect(JSON.stringify(run)).not.toMatch(/Test Song|9900000/);
 

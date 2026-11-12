@@ -24,9 +24,29 @@ export interface RevealedTrack {
   coverUrl: string | null;
 }
 
+export interface ProfileState {
+  id: string;
+  source: "lastfm";
+  displayName: string;
+  status: "pending" | "running" | "done" | "failed";
+  /** Songs found on the source, looked at so far, and matched to a playable track. */
+  total: number;
+  processed: number;
+  matched: number;
+  error: string | null;
+  importedAt: string | null;
+}
+
+/** Where a run's songs come from. null means the default pool. */
+export interface RunSource {
+  profileId: string;
+  displayName: string;
+}
+
 export interface RunState {
   runId: string;
   nickname: string | null;
+  source: RunSource | null;
   totalScore: number;
   finished: boolean;
   rounds: RoundState[];

@@ -10,6 +10,7 @@ import {
   scoreRound,
   type LeaderboardEntry,
   type PoolTrack,
+  type ProfileState,
   type RoundState,
   type RunState,
 } from "@splitsecond/shared";
@@ -17,9 +18,11 @@ import { api } from "@/lib/api";
 import { SnippetPlayer, type LoadedClip } from "@/lib/snippet-player";
 import { Scrubber } from "./Scrubber";
 import { GuessInput } from "./GuessInput";
+import { SourcePicker } from "./SourcePicker";
 
 const RUN_KEY = "splitsecond.run";
 const NAME_KEY = "splitsecond.nickname";
+const SOURCE_KEY = "splitsecond.source";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 function stored(key: string): string | null {
@@ -39,7 +42,13 @@ function store(key: string, value: string | null) {
 }
 
 export function Game() {
+  /** Songs that can be guessed in the current run. */
   const [pool, setPool] = useState<PoolTrack[] | null>(null);
+  /** Size of the default pool, for the lobby. */
+  const [chartSize, setChartSize] = useState<number | null>(null);
+  const [profiles, setProfiles] = useState<ProfileState[]>([]);
+  /** Selected profile id, or null for the default pool. */
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [run, setRun] = useState<RunState | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [nickname, setNickname] = useState("");
@@ -48,14 +57,24 @@ export function Game() {
   /** Index of the round on screen. Stays on a finished round until "Next". */
   const [viewIndex, setViewIndex] = useState(0);
 
-  const refreshLeaderboard = useCallback(() => {
-    api.leaderboard().then(setLeaderboard).catch(() => {});
+  const refreshLeaderboard = useCallback((profileId: string | null) => {
+    api.leaderboard(profileId).then(setLeaderboard).catch(() => {});
   }, []);
 
   useEffect(() => {
     setNickname(stored(NAME_KEY) ?? "");
-    api.pool().then(setPool).catch((e: Error) => setError(e.message));
-    refreshLeaderboard();
+    api
+      .pool()
+      .then((p) => setChartSize(p.length))
+      .catch((e: Error) => setError(e.message));
+    api
+      .profiles()
+      .then((list) => {
+        setProfiles(list);
+        const saved = stored(SOURCE_KEY);
+        if (saved && list.some((p) => p.id === saved)) setSourceId(saved);
+      })
+      .catch(() => {});
     const saved = stored(RUN_KEY);
     if (saved) {
       api
@@ -67,7 +86,55 @@ export function Game() {
         })
         .catch(() => store(RUN_KEY, null));
     }
-  }, [refreshLeaderboard]);
+  }, []);
+
+  // The leaderboard follows the selected source (or the current run's).
+  const boardSource = run ? (run.source?.profileId ?? null) : sourceId;
+  useEffect(() => refreshLeaderboard(boardSource), [boardSource, refreshLeaderboard]);
+
+  // Each run has its own guessable songs.
+  const runId = run?.runId;
+  useEffect(() => {
+    if (!runId) return;
+    setPool(null);
+    api.runPool(runId).then(setPool).catch((e: Error) => setError(e.message));
+  }, [runId]);
+
+  // Follow imports that are in progress.
+  const importing = profiles.filter((p) => p.status === "running" || p.status === "pending").map((p) => p.id);
+  const importingKey = importing.join(",");
+  useEffect(() => {
+    if (!importingKey) return;
+    const ids = importingKey.split(",");
+    const timer = setInterval(() => {
+      for (const id of ids) {
+        api
+          .profile(id)
+          .then((fresh) => setProfiles((list) => list.map((p) => (p.id === fresh.id ? fresh : p))))
+          .catch(() => {});
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [importingKey]);
+
+  const selectSource = (id: string | null) => {
+    setSourceId(id);
+    store(SOURCE_KEY, id);
+    setError(null);
+  };
+
+  const importProfile = async (username: string, refresh = false) => {
+    setError(null);
+    try {
+      const profile = await api.importProfile(username, refresh);
+      setProfiles((list) => [profile, ...list.filter((p) => p.id !== profile.id)]);
+      selectSource(profile.id);
+      return true;
+    } catch (e) {
+      setError((e as Error).message);
+      return false;
+    }
+  };
 
   const start = async () => {
     setBusy(true);
@@ -75,7 +142,7 @@ export function Game() {
     try {
       const name = nickname.trim();
       store(NAME_KEY, name || null);
-      const r = await api.createRun(name || undefined);
+      const r = await api.createRun(name || undefined, sourceId);
       store(RUN_KEY, r.runId);
       setRun(r);
       setViewIndex(0);
@@ -91,11 +158,14 @@ export function Game() {
       setRun(r);
       if (r.finished) {
         store(RUN_KEY, null);
-        refreshLeaderboard();
+        refreshLeaderboard(r.source?.profileId ?? null);
       }
     },
     [refreshLeaderboard],
   );
+
+  const selected = profiles.find((p) => p.id === sourceId) ?? null;
+  const playable = selected ? selected.status === "done" && selected.matched >= RUN_LENGTH : (chartSize ?? 0) >= RUN_LENGTH;
 
   const round = run?.rounds[viewIndex];
   const showSummary = run && run.finished && viewIndex >= RUN_LENGTH;
@@ -148,8 +218,14 @@ export function Game() {
           onNickname={setNickname}
           onStart={start}
           busy={busy}
-          poolSize={pool?.length ?? null}
+          playable={playable}
+          chartSize={chartSize}
+          profiles={profiles}
+          sourceId={sourceId}
+          onSelectSource={selectSource}
+          onImport={importProfile}
           leaderboard={leaderboard}
+          boardTitle={selected ? `Best runs on ${selected.displayName}'s songs` : "Best runs"}
         />
       )}
 
@@ -158,6 +234,7 @@ export function Game() {
           key={round.roundId}
           round={round}
           pool={pool}
+          sourceLabel={run.source ? `${run.source.displayName}'s Last.fm` : null}
           isLast={viewIndex === RUN_LENGTH - 1}
           onRunChange={onRunChange}
           onError={setError}
@@ -187,10 +264,15 @@ function Lobby(props: {
   onNickname: (v: string) => void;
   onStart: () => void;
   busy: boolean;
-  poolSize: number | null;
+  playable: boolean;
+  chartSize: number | null;
+  profiles: ProfileState[];
+  sourceId: string | null;
+  onSelectSource: (id: string | null) => void;
+  onImport: (username: string, refresh?: boolean) => Promise<boolean>;
   leaderboard: LeaderboardEntry[];
+  boardTitle: string;
 }) {
-  const empty = props.poolSize !== null && props.poolSize < RUN_LENGTH;
   return (
     <section className="lobby">
       <h1>
@@ -200,6 +282,13 @@ function Lobby(props: {
         Five songs, easy to hard. Each starts at {formatSeconds(0.1)}. Unlock more if you need it, but every extra
         moment costs points, and so does every wrong guess.
       </p>
+      <SourcePicker
+        chartSize={props.chartSize}
+        profiles={props.profiles}
+        selectedId={props.sourceId}
+        onSelect={props.onSelectSource}
+        onImport={props.onImport}
+      />
       <form
         className="start"
         onSubmit={(e) => {
@@ -215,15 +304,10 @@ function Lobby(props: {
           placeholder="Name for the leaderboard (optional)"
           aria-label="Name for the leaderboard"
         />
-        <button className="btn btn-primary" type="submit" disabled={props.busy || empty || props.poolSize === null}>
+        <button className="btn btn-primary" type="submit" disabled={props.busy || !props.playable}>
           {props.busy ? "Starting…" : "Start a run"}
         </button>
       </form>
-      {empty && (
-        <p className="hint">
-          The song pool is empty. Run <code>pnpm db:seed</code> to fill it from Deezer.
-        </p>
-      )}
       <ul className="rules">
         <li>
           <b>{fmt(basePoints(0.1))}</b> points at {formatSeconds(0.1)}
@@ -238,16 +322,24 @@ function Lobby(props: {
           <b>−{WRONG_GUESS_PENALTY}</b> per wrong guess
         </li>
       </ul>
-      <Leaderboard entries={props.leaderboard} />
+      <Leaderboard entries={props.leaderboard} title={props.boardTitle} />
     </section>
   );
 }
 
-function Leaderboard({ entries, highlight }: { entries: LeaderboardEntry[]; highlight?: string }) {
+function Leaderboard({
+  entries,
+  highlight,
+  title = "Best runs",
+}: {
+  entries: LeaderboardEntry[];
+  highlight?: string;
+  title?: string;
+}) {
   if (entries.length === 0) return null;
   return (
     <section className="board">
-      <h2>Best runs</h2>
+      <h2>{title}</h2>
       <ol>
         {entries.map((e, i) => (
           <li key={e.runId} className={e.runId === highlight ? "is-you" : undefined}>
@@ -264,6 +356,7 @@ function Leaderboard({ entries, highlight }: { entries: LeaderboardEntry[]; high
 function RoundView(props: {
   round: RoundState;
   pool: PoolTrack[];
+  sourceLabel: string | null;
   isLast: boolean;
   onRunChange: (run: RunState) => void;
   onError: (message: string | null) => void;
@@ -388,6 +481,7 @@ function RoundView(props: {
     <section className={`round${shake ? " is-shaking" : ""}`}>
       <p className="eyebrow">
         Song {round.index + 1} of {RUN_LENGTH}
+        {props.sourceLabel && <span className="eyebrow-source"> · {props.sourceLabel}</span>}
       </p>
 
       {!over && (
@@ -530,7 +624,11 @@ function Summary({
       <button type="button" className="btn btn-primary" onClick={onAgain} autoFocus>
         Play again
       </button>
-      <Leaderboard entries={leaderboard} highlight={run.runId} />
+      <Leaderboard
+        entries={leaderboard}
+        highlight={run.runId}
+        title={run.source ? `Best runs on ${run.source.displayName}'s songs` : "Best runs"}
+      />
     </section>
   );
 }

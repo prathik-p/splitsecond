@@ -24,9 +24,10 @@ model Track {
   inPool     Boolean  @default(true)
   createdAt  DateTime @default(now())
 
-  rounds  Round[]
-  guesses Guess[]
-  sources TrackSource[]
+  rounds   Round[]
+  guesses  Guess[]
+  sources  TrackSource[]
+  profiles ProfileTrack[]
 
   @@index([inPool, rank])
   @@index([songKey])
@@ -52,7 +53,9 @@ model Run {
   createdAt  DateTime  @default(now())
   finishedAt DateTime?
 
-  rounds Round[]
+  rounds   Round[]
+  /// Profiles whose songs this run draws from. Empty means the default pool.
+  profiles Profile[] @relation("RunProfiles")
 
   @@index([finishedAt, totalScore])
 }
@@ -94,4 +97,47 @@ model Guess {
 
   round        Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
   guessedTrack Track @relation(fields: [guessedTrackId], references: [id])
+}
+
+enum ImportStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// A listener whose music can be played, e.g. a Last.fm username.
+model Profile {
+  id          String       @id @default(cuid())
+  source      String       // "lastfm" today
+  /// Lower-cased, so "RJ" and "rj" are the same profile.
+  username    String
+  displayName String
+  status      ImportStatus @default(PENDING)
+  /// Import progress: songs found on the source, looked at so far, and matched to Deezer.
+  total       Int          @default(0)
+  processed   Int          @default(0)
+  matched     Int          @default(0)
+  error       String?
+  importedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  tracks ProfileTrack[]
+  runs   Run[]          @relation("RunProfiles")
+
+  @@unique([source, username])
+}
+
+/// A song a profile listens to. One Track can belong to many profiles.
+model ProfileTrack {
+  profileId String
+  trackId   String
+  playcount Int     @default(0)
+  loved     Boolean @default(false)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  track   Track   @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, trackId])
+  @@index([trackId])
 }
