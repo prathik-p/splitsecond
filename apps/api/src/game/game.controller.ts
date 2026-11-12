@@ -1,0 +1,51 @@
+import { Body, Controller, Get, Header, Param, Post, Query, StreamableFile } from "@nestjs/common";
+import { GameService } from "./game.service";
+
+@Controller()
+export class GameController {
+  constructor(private readonly game: GameService) {}
+
+  @Get("pool")
+  pool() {
+    return this.game.pool();
+  }
+
+  @Post("runs")
+  createRun(@Body() body: { nickname?: string } = {}) {
+    return this.game.createRun(body?.nickname);
+  }
+
+  @Get("runs/:id")
+  getRun(@Param("id") id: string) {
+    return this.game.getRun(id);
+  }
+
+  @Post("rounds/:id/unlock")
+  unlock(@Param("id") id: string, @Body() body: { seconds?: number }) {
+    return this.game.unlock(id, body?.seconds);
+  }
+
+  /** Audio is proxied so the browser never sees the Deezer id or preview URL. */
+  @Get("rounds/:id/audio")
+  @Header("Content-Type", "audio/mpeg")
+  @Header("Cache-Control", "no-store")
+  async audio(@Param("id") id: string) {
+    return new StreamableFile(await this.game.audio(id));
+  }
+
+  @Post("rounds/:id/guess")
+  guess(@Param("id") id: string, @Body() body: { trackId?: string }) {
+    return this.game.guess(id, body?.trackId);
+  }
+
+  @Post("rounds/:id/give-up")
+  giveUp(@Param("id") id: string) {
+    return this.game.giveUp(id);
+  }
+
+  @Get("leaderboard")
+  leaderboard(@Query("limit") limit?: string) {
+    const n = Math.min(100, Math.max(1, Number(limit) || 20));
+    return this.game.leaderboard(n);
+  }
+}

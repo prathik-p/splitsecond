@@ -1,0 +1,13 @@
+{
+  "name": "earshot",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "pnpm --filter @earshot/shared build && pnpm -r --parallel dev",
+    "build": "pnpm --filter @earshot/shared build && pnpm --filter \"./apps/*\" build",
+    "test": "pnpm -r test",
+    "db:up": "docker compose up -d db",
+    "db:migrate": "pnpm --filter @earshot/api prisma:migrate",
+    "db:seed": "pnpm --filter @earshot/api seed"
+  }
+}

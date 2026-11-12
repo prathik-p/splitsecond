@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A song in the playable pool. Later steps (Last.fm import, profiles) attach
+/// sources to tracks through TrackSource without changing this table.
+model Track {
+  id         String   @id @default(cuid())
+  deezerId   BigInt   @unique
+  isrc       String?  @unique
+  title      String
+  artist     String
+  album      String?
+  coverUrl   String?
+  /// Deezer popularity rank. Higher is more popular, so easier.
+  rank       Int
+  /// Normalised "title::artist", used to treat re-releases as the same song.
+  songKey    String
+  inPool     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  rounds  Round[]
+  guesses Guess[]
+  sources TrackSource[]
+
+  @@index([inPool, rank])
+  @@index([songKey])
+}
+
+/// Where a track came from: the fixed seed pool now, user profiles later.
+model TrackSource {
+  id        String   @id @default(cuid())
+  trackId   String
+  kind      String   // "seed" | "lastfm" | "deezer_playlist" | ...
+  reference String   // playlist id, username, ...
+  createdAt DateTime @default(now())
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([trackId, kind, reference])
+}
+
+model Run {
+  id         String    @id @default(cuid())
+  nickname   String?
+  totalScore Int       @default(0)
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  rounds Round[]
+
+  @@index([finishedAt, totalScore])
+}
+
+enum RoundStatus {
+  PLAYING
+  SOLVED
+  GIVEN_UP
+}
+
+/// The round id is what the browser sees. It never learns the Deezer id
+/// until the round is over.
+model Round {
+  id              String      @id @default(cuid())
+  runId           String
+  index           Int
+  trackId         String
+  unlockedSeconds Float       @default(0.1)
+  wrongGuesses    Int         @default(0)
+  status          RoundStatus @default(PLAYING)
+  score           Int?
+  createdAt       DateTime    @default(now())
+  endedAt         DateTime?
+
+  run     Run     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  track   Track   @relation(fields: [trackId], references: [id])
+  guesses Guess[]
+
+  @@unique([runId, index])
+}
+
+model Guess {
+  id              String   @id @default(cuid())
+  roundId         String
+  guessedTrackId  String
+  correct         Boolean
+  unlockedSeconds Float
+  createdAt       DateTime @default(now())
+
+  round        Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  guessedTrack Track @relation(fields: [guessedTrackId], references: [id])
+}
