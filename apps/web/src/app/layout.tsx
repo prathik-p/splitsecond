@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Earshot",
-  description: "Name the song from a fraction of a second.",
+  title: "Split Second",
+  description: "Name the song in a split second.",
 };
 
 export const viewport: Viewport = { themeColor: "#12100e", width: "device-width", initialScale: 1 };

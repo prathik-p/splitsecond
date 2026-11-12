@@ -7,7 +7,7 @@
  */
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { songKey } from "@earshot/shared";
+import { songKey } from "@splitsecond/shared";
 import { DeezerClient, DeezerTrack } from "../src/deezer/deezer-client";
 
 const prisma = new PrismaClient();

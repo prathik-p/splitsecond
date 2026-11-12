@@ -10,7 +10,7 @@ importers:
 
   apps/api:
     dependencies:
-      '@earshot/shared':
+      '@splitsecond/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@nestjs/common':
@@ -62,7 +62,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@earshot/shared':
+      '@splitsecond/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       fuse.js:

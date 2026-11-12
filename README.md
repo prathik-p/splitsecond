@@ -1,6 +1,6 @@
-# Earshot
+# Split Second
 
-Name the song from a fraction of a second. Each round starts with a 0.1s clip; drag the
+Name the song in a split second. Each round starts with a 0.1s clip; drag the
 log-scaled scrubber to unlock more, at a cost. A run is five songs, ordered easy to hard.
 
 This is step 1 of the build: single-player with a fixed track pool from the Deezer public API.

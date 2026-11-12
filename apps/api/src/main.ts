@@ -14,6 +14,6 @@ async function bootstrap() {
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? "http://localhost:3000" });
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port);
-  console.log(`Earshot API on http://localhost:${port}/api`);
+  console.log(`Split Second API on http://localhost:${port}/api`);
 }
 bootstrap();

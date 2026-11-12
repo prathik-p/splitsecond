@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
-import { normalizeTitle, type PoolTrack } from "@earshot/shared";
+import { normalizeTitle, type PoolTrack } from "@splitsecond/shared";
 
 interface Props {
   pool: PoolTrack[];

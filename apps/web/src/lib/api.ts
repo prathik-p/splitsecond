@@ -1,4 +1,4 @@
-import type { GuessResult, LeaderboardEntry, PoolTrack, RoundState, RunState } from "@earshot/shared";
+import type { GuessResult, LeaderboardEntry, PoolTrack, RoundState, RunState } from "@splitsecond/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {

@@ -9,7 +9,7 @@ import {
   positionToSeconds,
   secondsToPosition,
   snapSeconds,
-} from "@earshot/shared";
+} from "@splitsecond/shared";
 
 const STOPS = [0.1, 0.5, 1, 2, 4, 8, 15, 30];
 

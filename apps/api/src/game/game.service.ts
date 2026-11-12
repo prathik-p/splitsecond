@@ -9,7 +9,7 @@ import {
   RunState,
   scoreRound,
   snapSeconds,
-} from "@earshot/shared";
+} from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { DeezerService } from "../deezer/deezer.service";
 import { sliceMp3 } from "../audio/mp3";

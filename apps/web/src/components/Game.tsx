@@ -12,14 +12,14 @@ import {
   type PoolTrack,
   type RoundState,
   type RunState,
-} from "@earshot/shared";
+} from "@splitsecond/shared";
 import { api } from "@/lib/api";
 import { SnippetPlayer, type LoadedClip } from "@/lib/snippet-player";
 import { Scrubber } from "./Scrubber";
 import { GuessInput } from "./GuessInput";
 
-const RUN_KEY = "earshot.run";
-const NAME_KEY = "earshot.nickname";
+const RUN_KEY = "splitsecond.run";
+const NAME_KEY = "splitsecond.nickname";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 function stored(key: string): string | null {
@@ -113,7 +113,7 @@ export function Game() {
           <span className="brand-mark" aria-hidden="true">
             <i /> <i /> <i /> <i />
           </span>
-          Earshot
+          Split Second
         </button>
         {run && (
           <div className="run-status">
@@ -194,7 +194,7 @@ function Lobby(props: {
   return (
     <section className="lobby">
       <h1>
-        Name the song from <em>a tenth of a second</em>.
+        Name the song in <em>a split second</em>.
       </h1>
       <p className="lede">
         Five songs, easy to hard. Each starts at {formatSeconds(0.1)}. Unlock more if you need it, but every extra

@@ -4,7 +4,7 @@
  */
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RUN_LENGTH, basePoints, songKey } from "@earshot/shared";
+import { RUN_LENGTH, basePoints, songKey } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { DeezerService } from "../deezer/deezer.service";
 import { GameService } from "./game.service";

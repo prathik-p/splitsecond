@@ -1,7 +1,7 @@
 /**
  * Stand-in for api.deezer.com, for developing or testing without network access.
  *
- *   pnpm --filter @earshot/api exec tsx test/mock-deezer.ts [port] [preview.mp3]
+ *   pnpm --filter @splitsecond/api exec tsx test/mock-deezer.ts [port] [preview.mp3]
  *   DEEZER_API_BASE=http://127.0.0.1:4010 pnpm db:seed
  */
 import { readFileSync } from "node:fs";
