@@ -100,9 +100,11 @@ export interface WikipediaOptions {
   backoffMs?: number;
   /** Longest single wait, whatever Wikipedia asks for. */
   maxWaitMs?: number;
+  /** Give up on a single request that hasn't answered after this long. */
+  timeoutMs?: number;
   /** Sent as the User-Agent. Wikipedia is more generous to clients that name a contact. */
   userAgent?: string;
-  /** Called before each wait for a retry, so a long pause isn't silent. */
+  /** Called before each wait for a retry, so a long pause isn't silent. Status 0 means no answer. */
   onWait?: (seconds: number, status: number) => void;
 }
 
@@ -122,6 +124,7 @@ export class WikipediaCharts {
   private readonly attempts: number;
   private readonly backoffMs: number;
   private readonly maxWaitMs: number;
+  private readonly timeoutMs: number;
   private readonly userAgent: string;
   private readonly onWait?: (seconds: number, status: number) => void;
   private nextAt = 0;
@@ -134,6 +137,7 @@ export class WikipediaCharts {
     this.attempts = options.attempts ?? 5;
     this.backoffMs = options.backoffMs ?? 5000;
     this.maxWaitMs = options.maxWaitMs ?? 120_000;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
     // Wikipedia asks API clients to identify themselves.
     this.userAgent = options.userAgent || "song-game-seeder/1.0";
     this.onWait = options.onWait;
@@ -146,13 +150,19 @@ export class WikipediaCharts {
       const at = Math.max(Date.now(), this.nextAt);
       this.nextAt = at + this.gapMs;
       if (at > Date.now()) await sleep(at - Date.now());
-      const res = await fetch(url, { headers: { accept: "application/json", "user-agent": this.userAgent } });
-      if (res.ok) return res;
-      const retryable = res.status === 429 || res.status >= 500;
-      if (!retryable || attempt >= this.attempts) throw new Error(`Wikipedia HTTP ${res.status}`);
-      await res.arrayBuffer().catch(() => undefined); // free the connection
-      const pause = Math.min(this.maxWaitMs, retryAfterMs(res.headers.get("retry-after")) ?? this.backoffMs * attempt);
-      this.onWait?.(Math.ceil(pause / 1000), res.status);
+      const res = await fetch(url, {
+        headers: { accept: "application/json", "user-agent": this.userAgent },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      }).catch(() => null); // no answer or no connection: retried like a server error
+      if (res?.ok) return res;
+      const status = res?.status ?? 0;
+      const retryable = status === 0 || status === 429 || status >= 500;
+      if (!retryable || attempt >= this.attempts) {
+        throw new Error(status ? `Wikipedia HTTP ${status}` : "Wikipedia didn't answer");
+      }
+      await res?.arrayBuffer().catch(() => undefined); // free the connection
+      const pause = Math.min(this.maxWaitMs, retryAfterMs(res?.headers.get("retry-after") ?? null) ?? this.backoffMs * attempt);
+      this.onWait?.(Math.ceil(pause / 1000), status);
       this.nextAt = Math.max(this.nextAt, Date.now() + pause);
     }
   }

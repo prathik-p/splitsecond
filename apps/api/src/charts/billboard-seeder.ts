@@ -21,6 +21,8 @@ export interface BillboardResult {
   byYear: Record<number, number>;
   /** Years whose chart couldn't be read this time (not the same as not published yet). */
   unread: number[];
+  /** Chart entries not reached because the catalog kept refusing lookups; a re-run continues with them. */
+  remaining: number;
 }
 
 /** Chart position as a popularity rank on the scale Deezer uses (higher is easier). */
@@ -106,6 +108,7 @@ export async function seedBillboard(
   for (let year = fromYear; year <= toYear; year++) byYear[year] = 0;
   let missed = 0;
   let checked = 0;
+  let remaining = 0;
   log(`${queue.length} chart entries to check`);
 
   for (const { year, entry } of queue) {
@@ -129,6 +132,11 @@ export async function seedBillboard(
         hit = chooseForEntry(entry, year, await catalog.search(entry.title, leadArtist(entry.artist)));
       } catch (err) {
         log(`"${entry.title}" by ${entry.artist}: lookup failed (${(err as Error).message})`);
+        if ((err as { rateLimited?: boolean }).rateLimited) {
+          // The catalog has refused through every retry. More lookups would only prolong it.
+          remaining = queue.length - checked + 1;
+          break;
+        }
       }
       if (!hit) {
         missed++;
@@ -167,5 +175,5 @@ export async function seedBillboard(
     }
   }
 
-  return { saved: Object.values(byYear).reduce((a, b) => a + b, 0), missed, byYear, unread };
+  return { saved: Object.values(byYear).reduce((a, b) => a + b, 0), missed, byYear, unread, remaining };
 }

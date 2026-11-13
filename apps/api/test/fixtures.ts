@@ -243,11 +243,13 @@ export async function startMockApple(
     delayMs?: number;
   } = {},
 ) {
-  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0, wikipedia: 0, chart: 0, topSongs: 0 };
+  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0, hung: 0, wikipedia: 0, chart: 0, topSongs: 0 };
   const wikipediaAt: number[] = [];
   /** Set > 0 to answer that many search calls with 403, like Apple's rate limiter. */
   const control = {
     rejectNext: 0,
+    /** Leave this many search calls unanswered, like a connection gone quiet. */
+    hangNext: 0,
     previewPath: "/preview",
     /** Answer this many Wikipedia calls with 429 and this Retry-After (seconds), if set. */
     wikipediaRejectNext: 0,
@@ -279,6 +281,12 @@ export async function startMockApple(
     });
 
     if (url.pathname === "/search") {
+      if (control.hangNext > 0) {
+        control.hangNext--;
+        stats.hung++;
+        setTimeout(() => res.destroy(), 2000).unref();
+        return;
+      }
       if (control.rejectNext > 0) {
         control.rejectNext--;
         stats.rateLimited++;

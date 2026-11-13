@@ -101,14 +101,14 @@ export class CatalogService {
 
   private async itunesPreview(track: Track): Promise<Buffer> {
     if (track.previewUrl) {
-      const res = await fetch(track.previewUrl).catch(() => null);
+      const res = await fetch(track.previewUrl, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
       if (res?.ok) return Buffer.from(await res.arrayBuffer());
     }
     // The stored URL is missing or stale: ask Apple for the current one.
     const fresh = await this.itunes.track(String(track.itunesId));
     if (!fresh?.previewUrl) throw new Error("iTunes no longer offers a preview");
     await this.prisma.track.update({ where: { id: track.id }, data: { previewUrl: fresh.previewUrl } });
-    const res = await fetch(fresh.previewUrl);
+    const res = await fetch(fresh.previewUrl, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`Preview download failed: HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   }

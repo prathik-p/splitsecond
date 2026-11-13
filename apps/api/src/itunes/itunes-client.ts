@@ -4,8 +4,9 @@ import type { Catalog, CatalogTrack } from "../catalog/types";
  * Apple's public iTunes Search API. No key, works worldwide, and every song
  * result carries a 30 second AAC preview URL.
  *
- * Apple asks for roughly 20 calls a minute, so calls are spaced out here and a
- * 403/429 (their way of saying "slow down") is retried after a pause.
+ * Apple asks for roughly 20 calls a minute, so calls are spaced out here. A
+ * 403/429 (their way of saying "slow down") is retried after a pause and slows
+ * the pace from then on; a request that gets no answer is cut off and retried.
  */
 
 interface ItunesSong {
@@ -25,7 +26,15 @@ interface ItunesResponse {
   results: ItunesSong[];
 }
 
-export class ItunesError extends Error {}
+export class ItunesError extends Error {
+  constructor(
+    message: string,
+    /** True when Apple kept answering "slow down" until the tries ran out. */
+    readonly rateLimited = false,
+  ) {
+    super(message);
+  }
+}
 
 export interface ItunesOptions {
   baseUrl?: string;
@@ -33,16 +42,31 @@ export interface ItunesOptions {
   country?: string;
   /** Calls allowed per minute. */
   perMinute?: number;
-  /** Pause after being rate limited, multiplied by the attempt number. */
+  /** Pause after being rate limited, multiplied by the attempt number (capped at five minutes). */
   backoffMs?: number;
+  /** Pause after a dropped connection or server error, multiplied by the attempt number. */
+  retryMs?: number;
+  /** Give up on a single request that hasn't answered after this long. */
+  timeoutMs?: number;
+  /** How many times to try one call before giving up. */
+  attempts?: number;
+  /** Called before each wait for a retry, so a long pause isn't silent. */
+  onWait?: (wait: { seconds: number; reason: string; rateLimited: boolean; perMinute: number }) => void;
 }
+
+/** After a "slow down", never pace slower than this many calls a minute. */
+const SLOWEST_PER_MINUTE = 8;
 
 export class ItunesClient implements Catalog {
   readonly provider = "itunes" as const;
   private readonly baseUrl: string;
   private readonly country: string;
-  private readonly gapMs: number;
+  private gapMs: number;
   private readonly backoffMs: number;
+  private readonly retryMs: number;
+  private readonly timeoutMs: number;
+  private readonly attempts: number;
+  private readonly onWait?: ItunesOptions["onWait"];
   /** Requests queue behind this so they leave one at a time, evenly spaced. */
   private queue: Promise<unknown> = Promise.resolve();
   private nextAt = 0;
@@ -52,6 +76,15 @@ export class ItunesClient implements Catalog {
     this.country = options.country ?? "US";
     this.gapMs = 60_000 / Math.max(1, options.perMinute ?? 19);
     this.backoffMs = options.backoffMs ?? 30_000;
+    this.retryMs = options.retryMs ?? 5_000;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
+    this.attempts = Math.max(1, options.attempts ?? 4);
+    this.onWait = options.onWait;
+  }
+
+  /** The current pace. It drops each time Apple says "slow down". */
+  get perMinute(): number {
+    return Math.round(60_000 / this.gapMs);
   }
 
   async search(title: string, artist: string, limit = 10): Promise<CatalogTrack[]> {
@@ -89,19 +122,46 @@ export class ItunesClient implements Catalog {
   }
 
   private async send(path: string): Promise<ItunesResponse> {
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       const wait = this.nextAt - Date.now();
       if (wait > 0) await sleep(wait);
       this.nextAt = Date.now() + this.gapMs;
 
-      const res = await fetch(`${this.baseUrl}${path}`, { headers: { accept: "application/json" } });
-      if (res.ok) return (await res.json()) as ItunesResponse;
-      if ((res.status === 403 || res.status === 429) && attempt < 3) {
-        // Rate limited: back off well past the per-minute window.
-        this.nextAt = Date.now() + this.backoffMs * (attempt + 1);
-        continue;
+      let reason: string;
+      let pause: number;
+      let rateLimited = false;
+      try {
+        const res = await fetch(`${this.baseUrl}${path}`, {
+          headers: { accept: "application/json" },
+          // Without this a connection that goes quiet would hang for minutes.
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+        if (res.ok) return (await res.json()) as ItunesResponse;
+        await res.arrayBuffer().catch(() => undefined); // free the connection
+        if (res.status === 403 || res.status === 429) {
+          // Rate limited: back off well past the per-minute window, and go slower from here on.
+          rateLimited = true;
+          const asked = Number(res.headers.get("retry-after"));
+          pause = Math.min(300_000, asked > 0 ? asked * 1000 : this.backoffMs * attempt);
+          this.gapMs = Math.max(this.gapMs, Math.min(this.gapMs * 1.4, 60_000 / SLOWEST_PER_MINUTE));
+        } else if (res.status >= 500) {
+          pause = this.retryMs * attempt;
+        } else {
+          throw new ItunesError(`iTunes HTTP ${res.status}`);
+        }
+        reason = `iTunes HTTP ${res.status}`;
+      } catch (err) {
+        if (err instanceof ItunesError) throw err;
+        const timedOut = (err as Error).name === "TimeoutError" || (err as Error).name === "AbortError";
+        reason = timedOut
+          ? `no answer from iTunes in ${Math.round(this.timeoutMs / 1000)}s`
+          : `couldn't reach iTunes (${((err as Error).cause as Error | undefined)?.message ?? (err as Error).message})`;
+        pause = this.retryMs * attempt;
       }
-      throw new ItunesError(`iTunes HTTP ${res.status}`);
+
+      if (attempt >= this.attempts) throw new ItunesError(reason, rateLimited);
+      this.onWait?.({ seconds: Math.ceil(pause / 1000), reason, rateLimited, perMinute: this.perMinute });
+      this.nextAt = Date.now() + Math.max(pause, this.gapMs);
     }
   }
 }

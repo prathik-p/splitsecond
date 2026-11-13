@@ -33,6 +33,11 @@ The charts are read from Wikipedia one page every second or two, and the seed wa
 tries again when Wikipedia says "too many requests". If a year still can't be read, the seed
 names it at the end; run it again a few minutes later and it adds just the missing years.
 
+Apple sometimes refuses lookups for a while even at 20 a minute. The seed says so when it
+happens, waits, and carries on at a slower pace. If Apple keeps refusing for several minutes
+the seed stops with a note; run it again later and it continues. `ITUNES_PER_MINUTE=12`
+makes the whole seed gentler.
+
 If the seed finds nothing or songs won't play, `pnpm check:services` tests each outside
 service from your machine and says which one is the problem.
 

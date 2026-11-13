@@ -49,6 +49,14 @@ async function seedFromItunes() {
     baseUrl: process.env.ITUNES_API_BASE || undefined,
     country: process.env.ITUNES_COUNTRY || undefined,
     perMinute: Number(process.env.ITUNES_PER_MINUTE) || undefined,
+    // The seed can afford to be patient: up to about 14 minutes of waiting on one lookup.
+    attempts: 8,
+    onWait: ({ seconds, reason, rateLimited, perMinute }) =>
+      indent(
+        rateLimited
+          ? `Apple asked us to slow down (${reason}); waiting ${seconds}s, then continuing at ${perMinute} lookups a minute`
+          : `${reason}; trying again in ${seconds}s`,
+      ),
   });
 
   console.log("Adding Apple's current chart…");
@@ -70,6 +78,12 @@ async function seedFromItunes() {
   const result = await seedBillboard(prisma, itunes, charts, { fromYear, toYear, perYear, log: indent });
   // A song on two years' charts is one song in the pool, so this can be more than the pool grew by.
   console.log(`${result.saved} chart entries matched to a song, ${result.missed} not found on iTunes.`);
+  if (result.remaining) {
+    console.log(
+      `Stopped early: Apple is still refusing lookups after several minutes of waiting. ${result.remaining} chart entries are left.\n` +
+        "Everything so far is saved. Run the seed again in half an hour or so to continue; ITUNES_PER_MINUTE=12 in apps/api/.env makes it gentler.",
+    );
+  }
   if (result.unread.length) {
     console.log(`Couldn't read the chart for: ${result.unread.join(", ")}. Run the seed again in a few minutes to add them.`);
   }

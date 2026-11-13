@@ -86,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
     const log: string[] = [];
     const result = await seed(log);
     // 2005: positions 1, 2 and 4 match; 3 is a karaoke act, 5 has no preview; 6 is beyond perYear.
-    expect(result).toEqual({ saved: 7, missed: 2, unread: [], byYear: { 2004: 0, 2005: 3, 2006: 4 } });
+    expect(result).toEqual({ saved: 7, missed: 2, unread: [], remaining: 0, byYear: { 2004: 0, 2005: 3, 2006: 4 } });
     expect(log).toContain("2004: no year-end chart published yet");
 
     const saved = await prisma.track.findMany({ where: mine, orderBy: { itunesId: "asc" }, include: { sources: true } });
@@ -117,19 +117,62 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
     expect(await prisma.track.count({ where: mine })).toBe(6);
   });
 
-  it("waits and retries when Apple rate-limits", async () => {
+  it("waits and retries when Apple rate-limits, slowing down from then on", async () => {
     await prisma.track.deleteMany({ where: { itunesId: BigInt(ID + 8) } });
-    const patient = new ItunesClient({ baseUrl: mock.url, perMinute: 60_000, backoffMs: 5 });
+    const waits: { reason: string; rateLimited: boolean }[] = [];
+    const patient = new ItunesClient({ baseUrl: mock.url, perMinute: 6000, backoffMs: 5, onWait: (w) => waits.push(w) });
     mock.control.rejectNext = 2;
     const hits = await patient.search("Third Of 2006", "Theta");
     expect(hits.map((h) => h.id)).toEqual([String(ID + 8)]);
     expect(mock.stats().rateLimited).toBe(2);
+    expect(waits).toMatchObject([
+      { reason: "iTunes HTTP 403", rateLimited: true },
+      { reason: "iTunes HTTP 403", rateLimited: true },
+    ]);
+    expect(patient.perMinute).toBeLessThan(4000); // two slow-downs of 1.4x from 6000
 
-    // Three refusals in a row and it gives up, rather than hanging the seed.
-    mock.control.rejectNext = 4;
-    await expect(patient.search("Third Of 2006", "Theta")).rejects.toThrow(/403/);
-    mock.control.rejectNext = 0;
+    // Refused on every try and it gives up, rather than hanging the seed.
+    const brief = new ItunesClient({ baseUrl: mock.url, perMinute: 60_000, backoffMs: 5, attempts: 3 });
+    mock.control.rejectNext = 3;
+    await expect(brief.search("Third Of 2006", "Theta")).rejects.toMatchObject({ message: "iTunes HTTP 403", rateLimited: true });
+    expect(mock.control.rejectNext).toBe(0);
     await seed();
+  });
+
+  it("cuts off a request that gets no answer and tries again", async () => {
+    const waits: string[] = [];
+    const client = new ItunesClient({
+      baseUrl: mock.url,
+      perMinute: 60_000,
+      timeoutMs: 80,
+      retryMs: 1,
+      onWait: (w) => waits.push(w.reason),
+    });
+    mock.control.hangNext = 1;
+    const started = Date.now();
+    const hits = await client.search("Third Of 2006", "Theta");
+    expect(hits.map((h) => h.id)).toEqual([String(ID + 8)]);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(waits).toEqual(["no answer from iTunes in 0s"]);
+  });
+
+  it("stops the seed, keeping what is saved, when Apple refuses through every retry", async () => {
+    await prisma.track.deleteMany({ where: { itunesId: { in: [BigInt(ID + 7), BigInt(ID + 8)] } } });
+    const refused = new ItunesClient({ baseUrl: mock.url, perMinute: 60_000, backoffMs: 1, attempts: 2 });
+    mock.control.rejectNext = 2;
+    const log: string[] = [];
+    const stopped = await seedBillboard(prisma, refused, wikipedia, {
+      fromYear: 2004,
+      toYear: 2006,
+      perYear: 5,
+      log: (m) => log.push(m),
+    });
+    expect(stopped.remaining).toBeGreaterThan(0);
+    expect(log.some((m) => m.includes("lookup failed (iTunes HTTP 403)"))).toBe(true);
+    expect(mock.control.rejectNext).toBe(0);
+    // The next run finishes the job.
+    const again = await seed();
+    expect(again).toMatchObject({ saved: 7, remaining: 0 });
   });
 
   it("spaces out Wikipedia requests and waits out a 'too many requests'", async () => {

@@ -29,7 +29,11 @@ export function chartIdsFromFeed(body: FeedBody): string[] {
 
 /** One Apple chart feed as track ids in chart order. */
 export async function appleChartIds(feedUrl: string): Promise<string[]> {
-  const res = await fetch(feedUrl, { headers: { accept: "application/json" } });
+  const res = await fetch(feedUrl, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }).catch(
+    (err: Error) => {
+      throw new Error(err.name === "TimeoutError" ? "Apple chart didn't answer in 15s" : `Apple chart unreachable (${err.message})`);
+    },
+  );
   if (!res.ok) throw new Error(`Apple chart HTTP ${res.status}`);
   return chartIdsFromFeed((await res.json()) as FeedBody);
 }
