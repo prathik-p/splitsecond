@@ -3,26 +3,73 @@ import { songKey } from "@splitsecond/shared";
 import type { ItunesClient } from "../itunes/itunes-client";
 import { rankForPosition } from "./billboard-seeder";
 
-/** Apple's "most played" songs right now, as track ids in chart order. */
+/** Apple's "most played" songs right now. */
+export const APPLE_CHART_URL = "https://rss.applemarketingtools.com/api/v2/us/music/most-played/100/songs.json";
+/** The older iTunes "top songs" feed, on the same host as the search API. Used when the first is down. */
+export const APPLE_TOP_SONGS_URL = "https://itunes.apple.com/us/rss/topsongs/limit=100/json";
+
+interface FeedBody {
+  feed?: {
+    /** The marketing-tools feed. */
+    results?: { id?: string }[];
+    /** The older iTunes feed; a single song comes as an object, not a list. */
+    entry?: LegacyEntry | LegacyEntry[];
+  };
+}
+interface LegacyEntry {
+  id?: { attributes?: { "im:id"?: string } };
+}
+
+/** Track ids in chart order, from either shape of Apple feed. */
+export function chartIdsFromFeed(body: FeedBody): string[] {
+  const legacy = body.feed?.entry ? [body.feed.entry].flat().map((e) => e.id?.attributes?.["im:id"]) : [];
+  const ids = [...(body.feed?.results ?? []).map((r) => r.id), ...legacy];
+  return ids.filter((id): id is string => !!id && /^\d+$/.test(id));
+}
+
+/** One Apple chart feed as track ids in chart order. */
 export async function appleChartIds(feedUrl: string): Promise<string[]> {
   const res = await fetch(feedUrl, { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`Apple chart HTTP ${res.status}`);
-  const body = (await res.json()) as { feed?: { results?: { id?: string }[] } };
-  return (body.feed?.results ?? []).map((r) => r.id).filter((id): id is string => !!id && /^\d+$/.test(id));
+  return chartIdsFromFeed((await res.json()) as FeedBody);
 }
 
-export const APPLE_CHART_URL = "https://rss.applemarketingtools.com/api/v2/us/music/most-played/100/songs.json";
+/**
+ * The current chart from the first feed that answers with songs. Apple's feeds
+ * have bad moments, so each is tried twice before moving to the next.
+ */
+export async function currentChartIds(
+  feedUrls: string[] = [APPLE_CHART_URL, APPLE_TOP_SONGS_URL],
+  retryMs = 3000,
+): Promise<{ ids: string[]; feedUrl: string }> {
+  let failure = new Error("no Apple chart feed to read");
+  for (const feedUrl of feedUrls) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const ids = await appleChartIds(feedUrl);
+        if (ids.length > 0) return { ids, feedUrl };
+        failure = new Error("Apple chart came back empty");
+        break;
+      } catch (err) {
+        failure = err as Error;
+        if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, retryMs));
+      }
+    }
+  }
+  throw failure;
+}
 
 /**
- * Add today's most played songs to the pool. This covers the current year,
+ * Add today's most popular songs to the pool. This covers the current year,
  * which has no year-end chart until December. Returns how many are in the pool.
  */
 export async function seedAppleChart(
   prisma: PrismaClient,
   itunes: ItunesClient,
-  options: { feedUrl?: string; fromYear: number; limit?: number },
+  options: { feedUrls?: string[]; fromYear: number; limit?: number; retryMs?: number },
 ): Promise<number> {
-  const ids = (await appleChartIds(options.feedUrl ?? APPLE_CHART_URL)).slice(0, options.limit ?? 100);
+  const chart = await currentChartIds(options.feedUrls?.length ? options.feedUrls : undefined, options.retryMs);
+  const ids = chart.ids.slice(0, options.limit ?? 100);
   const position = new Map(ids.map((id, i) => [id, i + 1]));
   const tracks = await itunes.tracks(ids);
 

@@ -19,6 +19,8 @@ export interface BillboardResult {
   /** Chart entries the catalog had no playable match for. */
   missed: number;
   byYear: Record<number, number>;
+  /** Years whose chart couldn't be read this time (not the same as not published yet). */
+  unread: number[];
 }
 
 /** Chart position as a popularity rank on the scale Deezer uses (higher is easier). */
@@ -81,12 +83,16 @@ export async function seedBillboard(
 
   const queue: { year: number; entry: ChartEntry }[] = [];
   const lists = new Map<number, ChartEntry[]>();
+  const unread: number[] = [];
   for (let year = fromYear; year <= toYear; year++) {
-    const list = await charts.yearEnd(year).catch((err: Error) => {
-      log(`${year}: couldn't read the chart (${err.message})`);
-      return [] as ChartEntry[];
-    });
-    if (list.length === 0) log(`${year}: no year-end chart published yet`);
+    let list: ChartEntry[] = [];
+    try {
+      list = await charts.yearEnd(year);
+      if (list.length === 0) log(`${year}: no year-end chart published yet`);
+    } catch (err) {
+      unread.push(year);
+      log(`${year}: couldn't read the chart (${(err as Error).message})`);
+    }
     lists.set(year, list.filter((e) => e.position <= perYear));
   }
   for (let position = 1; position <= perYear; position++) {
@@ -161,5 +167,5 @@ export async function seedBillboard(
     }
   }
 
-  return { saved: Object.values(byYear).reduce((a, b) => a + b, 0), missed, byYear };
+  return { saved: Object.values(byYear).reduce((a, b) => a + b, 0), missed, byYear, unread };
 }

@@ -10,7 +10,7 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { activeProvider } from "../src/catalog/catalog.service";
 import { sliceM4a } from "../src/audio/m4a";
-import { APPLE_CHART_URL, appleChartIds } from "../src/charts/apple-chart";
+import { currentChartIds } from "../src/charts/apple-chart";
 import { chooseForEntry } from "../src/charts/billboard-seeder";
 import { WikipediaCharts } from "../src/charts/wikipedia-charts";
 import { ItunesClient } from "../src/itunes/itunes-client";
@@ -71,14 +71,16 @@ async function main() {
     return `${file.length} bytes, ${res.headers.get("content-type")}, ${whole.seconds.toFixed(1)}s of AAC; a 0.1s cut is ${short.aac.length} bytes`;
   });
 
-  await check("Apple most-played chart", false, async () => {
-    const ids = await appleChartIds(process.env.APPLE_CHART_URL || APPLE_CHART_URL);
-    if (ids.length === 0) throw new Error("the feed came back empty");
-    return `${ids.length} songs`;
+  await check("Apple current chart", false, async () => {
+    const feeds = (process.env.APPLE_CHART_URL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const { ids, feedUrl } = await currentChartIds(feeds.length ? feeds : undefined);
+    return `${ids.length} songs from ${new URL(feedUrl).host}`;
   });
 
   await check("Wikipedia year-end chart (2005)", usingItunes, async () => {
-    const list = await new WikipediaCharts(process.env.WIKIPEDIA_API_BASE || undefined).yearEnd(2005);
+    const list = await new WikipediaCharts(process.env.WIKIPEDIA_API_BASE || undefined, {
+      userAgent: process.env.WIKIPEDIA_USER_AGENT || undefined,
+    }).yearEnd(2005);
     if (list.length < 50) throw new Error(`parsed only ${list.length} entries; the page layout may have changed`);
     const [first] = list;
     return `${list.length} entries, number ${first.position} is "${first.title}" by ${first.artist}`;

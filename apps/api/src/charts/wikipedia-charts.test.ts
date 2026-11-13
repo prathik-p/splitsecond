@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseYearEndPage } from "./wikipedia-charts";
+import { parseYearEndPage, retryAfterMs } from "./wikipedia-charts";
+import { chartIdsFromFeed } from "./apple-chart";
 import { chooseForEntry, leadArtist, rankForPosition } from "./billboard-seeder";
 import type { CatalogTrack } from "../catalog/types";
 import { yearEndHtml } from "../../test/fixtures";
@@ -84,5 +85,25 @@ describe("matching chart entries to the catalog", () => {
     expect(rankForPosition(1)).toBe(1_000_000);
     expect(rankForPosition(100)).toBe(10_000);
     expect(rankForPosition(1)).toBeGreaterThan(rankForPosition(2));
+  });
+});
+
+describe("retryAfterMs", () => {
+  it("reads seconds or a date, and nothing from junk", () => {
+    expect(retryAfterMs("12")).toBe(12_000);
+    expect(retryAfterMs("Fri, 13 Nov 2026 10:00:30 GMT", Date.parse("2026-11-13T10:00:00Z"))).toBe(30_000);
+    expect(retryAfterMs("Fri, 13 Nov 2026 10:00:30 GMT", Date.parse("2026-11-13T11:00:00Z"))).toBe(0);
+    expect(retryAfterMs(null)).toBeNull();
+    expect(retryAfterMs("soon")).toBeNull();
+  });
+});
+
+describe("chartIdsFromFeed", () => {
+  it("reads both shapes of Apple feed", () => {
+    expect(chartIdsFromFeed({ feed: { results: [{ id: "11" }, { id: "x" }, {}, { id: "12" }] } })).toEqual(["11", "12"]);
+    const entry = (id: string) => ({ id: { attributes: { "im:id": id } } });
+    expect(chartIdsFromFeed({ feed: { entry: [entry("21"), entry("22")] } })).toEqual(["21", "22"]);
+    expect(chartIdsFromFeed({ feed: { entry: entry("31") } })).toEqual(["31"]);
+    expect(chartIdsFromFeed({})).toEqual([]);
   });
 });

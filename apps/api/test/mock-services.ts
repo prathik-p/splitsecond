@@ -146,6 +146,7 @@ itunesSongs.push({ id: 899_999, title: "Hey Ya!", artist: "OutKast", releaseDate
 void startMockApple(itunesSongs, m4a, {
   charts,
   mostPlayed: [800_000 + 14, 800_000 + 6],
+  topSongs: [800_000 + 14, 800_000 + 6],
   port: APPLE_PORT,
   delayMs: delay,
 }).then(() => console.log(`Mock iTunes, Apple chart and Wikipedia on http://127.0.0.1:${APPLE_PORT}`));

@@ -227,7 +227,7 @@ export function yearEndHtml(rows: { position: number; title: string; artist: str
 
 /**
  * Stand-ins for Apple's iTunes Search API (/search, /lookup, previews), Apple's
- * most-played feed (/chart.json) and Wikipedia's parse API (/w/api.php), on one server.
+ * chart feeds (/chart.json, /topsongs.json) and Wikipedia's parse API (/w/api.php), on one server.
  */
 export async function startMockApple(
   songs: MockItunesSong[],
@@ -235,15 +235,26 @@ export async function startMockApple(
   options: {
     charts?: Record<number, { position: number; title: string; artist: string }[]>;
     mostPlayed?: number[];
+    /** Ids on the older "top songs" feed (/topsongs.json). */
+    topSongs?: number[];
     /** Fixed port, for the standalone mock. Defaults to any free port. */
     port?: number;
     /** Delay each search by this long, so import progress is visible. */
     delayMs?: number;
   } = {},
 ) {
-  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0 };
+  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0, wikipedia: 0, chart: 0, topSongs: 0 };
+  const wikipediaAt: number[] = [];
   /** Set > 0 to answer that many search calls with 403, like Apple's rate limiter. */
-  const control = { rejectNext: 0, previewPath: "/preview" };
+  const control = {
+    rejectNext: 0,
+    previewPath: "/preview",
+    /** Answer this many Wikipedia calls with 429 and this Retry-After (seconds), if set. */
+    wikipediaRejectNext: 0,
+    wikipediaRetryAfter: null as string | null,
+    /** Answer this many calls to the most-played feed with 502. */
+    chartFailNext: 0,
+  };
   const server: Server = createServer((req, res) => {
     if (options.delayMs && req.url?.startsWith("/search")) setTimeout(() => handle(req, res), options.delayMs);
     else handle(req, res);
@@ -295,9 +306,29 @@ export async function startMockApple(
       return res.end(m4a);
     }
     if (url.pathname === "/chart.json") {
+      stats.chart++;
+      if (control.chartFailNext > 0) {
+        control.chartFailNext--;
+        res.statusCode = 502;
+        return res.end();
+      }
       return json({ feed: { results: (options.mostPlayed ?? []).map((id) => ({ id: String(id), kind: "songs" })) } });
     }
+    if (url.pathname === "/topsongs.json") {
+      // The older iTunes feed: ids sit under entry[].id.attributes["im:id"].
+      stats.topSongs++;
+      const entry = (options.topSongs ?? []).map((id) => ({ id: { label: `${base}/song/${id}`, attributes: { "im:id": String(id) } } }));
+      return json({ feed: { entry } });
+    }
     if (url.pathname === "/w/api.php") {
+      stats.wikipedia++;
+      wikipediaAt.push(Date.now());
+      if (control.wikipediaRejectNext > 0) {
+        control.wikipediaRejectNext--;
+        res.statusCode = 429;
+        if (control.wikipediaRetryAfter) res.setHeader("retry-after", control.wikipediaRetryAfter);
+        return res.end("Too many requests");
+      }
       const year = Number(/_of_(\d{4})$/.exec(url.searchParams.get("page") ?? "")?.[1]);
       const rows = options.charts?.[year];
       return json(
@@ -315,6 +346,9 @@ export async function startMockApple(
     url,
     wikipediaUrl: `${url}/w/api.php`,
     chartUrl: `${url}/chart.json`,
+    topSongsUrl: `${url}/topsongs.json`,
+    /** When each Wikipedia call arrived, for checking the pacing. */
+    wikipediaAt: () => [...wikipediaAt],
     stats: () => ({ ...stats }),
     control,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),

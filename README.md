@@ -29,6 +29,10 @@ seed (50 songs for each of 26 years) takes around an hour. It works down the cha
 all years at once, so after a few minutes the pool is already playable. Leave it running in
 its own terminal, or stop it and run it again later: it continues where it stopped.
 
+The charts are read from Wikipedia one page every second or two, and the seed waits and
+tries again when Wikipedia says "too many requests". If a year still can't be read, the seed
+names it at the end; run it again a few minutes later and it adds just the missing years.
+
 If the seed finds nothing or songs won't play, `pnpm check:services` tests each outside
 service from your machine and says which one is the problem.
 
@@ -41,6 +45,7 @@ Seed and provider settings (environment or `apps/api/.env`):
 | `HITS_PER_YEAR` | 50 | How far down each year's chart to go; 0 skips the yearly hits |
 | `ITUNES_COUNTRY` | `US` | iTunes storefront to search |
 | `ITUNES_PER_MINUTE` | 19 | iTunes calls per minute |
+| `WIKIPEDIA_USER_AGENT` | a generic name | Optional. Wikipedia limits clients less when they name a contact, e.g. `my-app/1.0 (me@example.com)` |
 | `SEED_PLAYLISTS` | empty | Deezer only: extra playlist ids to add as they are |
 
 `pnpm test` runs the unit tests and, when `DATABASE_URL` is set, plays whole runs against
@@ -81,7 +86,7 @@ fetches a 30s preview. The hits are the Billboard Year-End Hot 100 of each year,
 Wikipedia, and each song is matched to iTunes by title and artist, preferring the release
 from around that year over later re-recordings. Chart position becomes the song's rank, so
 a year's number 1 is "easy" and its number 50 is "hard". The year in progress has no
-year-end chart until December, so the seed also adds Apple's current most-played songs.
+year-end chart until December, so the seed also adds Apple's current chart (most played, or the iTunes top songs feed if that is down).
 
 **Providers.** `MUSIC_PROVIDER=itunes` (the default) uses Apple's iTunes Search API: no
 key, works worldwide. `MUSIC_PROVIDER=deezer` uses Deezer instead, which adds ISRCs and a

@@ -91,8 +91,71 @@ export function parseYearEndPage(html: string): ChartEntry[] {
   return best.sort((a, b) => a.position - b.position);
 }
 
+export interface WikipediaOptions {
+  /** Pause between requests. Wikipedia turns away clients that ask too fast. */
+  gapMs?: number;
+  /** How many times to try a page that comes back "too many requests" or a server error. */
+  attempts?: number;
+  /** Wait before a retry when Wikipedia doesn't say how long; grows with each try. */
+  backoffMs?: number;
+  /** Longest single wait, whatever Wikipedia asks for. */
+  maxWaitMs?: number;
+  /** Sent as the User-Agent. Wikipedia is more generous to clients that name a contact. */
+  userAgent?: string;
+  /** Called before each wait for a retry, so a long pause isn't silent. */
+  onWait?: (seconds: number, status: number) => void;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A Retry-After header as milliseconds: either a number of seconds or a date. */
+export function retryAfterMs(header: string | null, now = Date.now()): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+}
+
 export class WikipediaCharts {
-  constructor(private readonly apiUrl = "https://en.wikipedia.org/w/api.php") {}
+  private readonly gapMs: number;
+  private readonly attempts: number;
+  private readonly backoffMs: number;
+  private readonly maxWaitMs: number;
+  private readonly userAgent: string;
+  private readonly onWait?: (seconds: number, status: number) => void;
+  private nextAt = 0;
+
+  constructor(
+    private readonly apiUrl = "https://en.wikipedia.org/w/api.php",
+    options: WikipediaOptions = {},
+  ) {
+    this.gapMs = options.gapMs ?? 1500;
+    this.attempts = options.attempts ?? 5;
+    this.backoffMs = options.backoffMs ?? 5000;
+    this.maxWaitMs = options.maxWaitMs ?? 120_000;
+    // Wikipedia asks API clients to identify themselves.
+    this.userAgent = options.userAgent || "song-game-seeder/1.0";
+    this.onWait = options.onWait;
+  }
+
+  /** One request at a time, spaced out; "slow down" and server errors are retried. */
+  private async get(url: URL): Promise<Response> {
+    for (let attempt = 1; ; attempt++) {
+      // Take the next free slot before waiting, so calls made together still go out one by one.
+      const at = Math.max(Date.now(), this.nextAt);
+      this.nextAt = at + this.gapMs;
+      if (at > Date.now()) await sleep(at - Date.now());
+      const res = await fetch(url, { headers: { accept: "application/json", "user-agent": this.userAgent } });
+      if (res.ok) return res;
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt >= this.attempts) throw new Error(`Wikipedia HTTP ${res.status}`);
+      await res.arrayBuffer().catch(() => undefined); // free the connection
+      const pause = Math.min(this.maxWaitMs, retryAfterMs(res.headers.get("retry-after")) ?? this.backoffMs * attempt);
+      this.onWait?.(Math.ceil(pause / 1000), res.status);
+      this.nextAt = Math.max(this.nextAt, Date.now() + pause);
+    }
+  }
 
   /** The Billboard Year-End Hot 100 for a year, or [] if Wikipedia has no page for it yet. */
   async yearEnd(year: number): Promise<ChartEntry[]> {
@@ -105,9 +168,7 @@ export class WikipediaCharts {
       formatversion: "2",
       redirects: "1",
     }).toString();
-    // Wikipedia asks API clients to identify themselves.
-    const res = await fetch(url, { headers: { accept: "application/json", "user-agent": "song-game-seeder/1.0" } });
-    if (!res.ok) throw new Error(`Wikipedia HTTP ${res.status}`);
+    const res = await this.get(url);
     const body = (await res.json()) as { parse?: { text?: string | { "*": string } }; error?: { code?: string; info?: string } };
     if (body.error) {
       if (body.error.code === "missingtitle") return [];

@@ -9,7 +9,7 @@
  * With MUSIC_PROVIDER=itunes (the default, works everywhere):
  *   - the Billboard Year-End Hot 100 of each year, read from Wikipedia, with each
  *     song matched to Apple's iTunes catalog for its preview
- *   - Apple's current most-played songs, which covers the year in progress
+ *   - Apple's current chart, which covers the year in progress
  *   Apple allows about 20 lookups a minute, so a full seed takes around an hour.
  *   It works down the charts across all years at once: stop it whenever you
  *   like and the pool is already playable; run it again to continue.
@@ -19,6 +19,7 @@
  *
  * Settings (environment, or apps/api/.env):
  *   HITS_FROM=2000  HITS_TO=<this year>  HITS_PER_YEAR=50   (0 skips the yearly hits)
+ *   WIKIPEDIA_USER_AGENT="my-app/1.0 (me@example.com)"   optional; Wikipedia limits named clients less
  *   SEED_PLAYLISTS=1234567,7654321   Deezer only: extra playlists to add as they are
  */
 import "dotenv/config";
@@ -40,6 +41,9 @@ const toYear = Number(process.env.HITS_TO) || new Date().getFullYear();
 const perYear = Number(process.env.HITS_PER_YEAR ?? 50);
 const indent = (m: string) => console.log(`  ${m}`);
 
+/** APPLE_CHART_URL can name one feed or several, comma-separated; unset uses Apple's two public feeds. */
+const feedUrls = () => (process.env.APPLE_CHART_URL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
 async function seedFromItunes() {
   const itunes = new ItunesClient({
     baseUrl: process.env.ITUNES_API_BASE || undefined,
@@ -47,9 +51,9 @@ async function seedFromItunes() {
     perMinute: Number(process.env.ITUNES_PER_MINUTE) || undefined,
   });
 
-  console.log("Adding Apple's current most-played songs…");
+  console.log("Adding Apple's current chart…");
   try {
-    const n = await seedAppleChart(prisma, itunes, { feedUrl: process.env.APPLE_CHART_URL || undefined, fromYear });
+    const n = await seedAppleChart(prisma, itunes, { feedUrls: feedUrls(), fromYear });
     console.log(`  ${n} current hits in the pool.`);
   } catch (err) {
     console.log(`  Skipped: ${(err as Error).message}`);
@@ -58,11 +62,17 @@ async function seedFromItunes() {
   if (perYear <= 0) return;
   console.log(`Adding the Billboard year-end top ${perYear} of ${fromYear} to ${toYear}.`);
   console.log("Apple allows about 20 lookups a minute, so this is slow. You can stop it and re-run to continue.");
-  const charts = new WikipediaCharts(process.env.WIKIPEDIA_API_BASE || undefined);
+  console.log("Reading the charts from Wikipedia, one every second or two…");
+  const charts = new WikipediaCharts(process.env.WIKIPEDIA_API_BASE || undefined, {
+    userAgent: process.env.WIKIPEDIA_USER_AGENT || undefined,
+    onWait: (seconds) => indent(`Wikipedia asked us to slow down; trying again in ${seconds}s`),
+  });
   const result = await seedBillboard(prisma, itunes, charts, { fromYear, toYear, perYear, log: indent });
-  console.log(`${result.saved} chart songs in the pool, ${result.missed} not found on iTunes.`);
-  const thin = Object.entries(result.byYear).filter(([, n]) => n === 0).map(([y]) => y);
-  if (thin.length) console.log(`No songs for: ${thin.join(", ")}.`);
+  // A song on two years' charts is one song in the pool, so this can be more than the pool grew by.
+  console.log(`${result.saved} chart entries matched to a song, ${result.missed} not found on iTunes.`);
+  if (result.unread.length) {
+    console.log(`Couldn't read the chart for: ${result.unread.join(", ")}. Run the seed again in a few minutes to add them.`);
+  }
 }
 
 async function seedFromDeezer() {
