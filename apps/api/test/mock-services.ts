@@ -1,18 +1,23 @@
 /**
- * Stand-ins for api.deezer.com and Last.fm, for developing or testing offline.
+ * Stand-ins for every outside service, for developing or testing offline.
  *
- *   pnpm --filter @splitsecond/api exec tsx test/mock-services.ts [preview.mp3]
+ *   pnpm --filter @splitsecond/api exec tsx test/mock-services.ts [preview.m4a] [preview.mp3]
  *
  * then in apps/api/.env:
+ *   ITUNES_API_BASE=http://127.0.0.1:4012
+ *   ITUNES_PER_MINUTE=6000
+ *   WIKIPEDIA_API_BASE=http://127.0.0.1:4012/w/api.php
+ *   APPLE_CHART_URL=http://127.0.0.1:4012/chart.json
  *   DEEZER_API_BASE=http://127.0.0.1:4010
  *   LASTFM_API_BASE=http://127.0.0.1:4011/2.0/
  *   LASTFM_API_KEY=anything
  *
  * Last.fm users: "mira_v" (a full library), "tiny" (two songs), "nobody" (empty).
- * MOCK_DELAY_MS slows Deezer searches so import progress is visible.
+ * MOCK_DELAY_MS slows searches so import progress is visible.
  */
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { join } from "node:path";
 import {
   fakeMp3,
   mockDeezerHandler,
@@ -20,11 +25,14 @@ import {
   MockLastfmUser,
   MockPlaylist,
   MockTrack,
+  startMockApple,
 } from "./fixtures";
 
 const DEEZER_PORT = 4010;
 const LASTFM_PORT = 4011;
-const mp3 = process.argv[2] ? readFileSync(process.argv[2]) : fakeMp3(1200);
+const APPLE_PORT = 4012;
+const m4a = readFileSync(process.argv[2] ?? join(__dirname, "data/tone-fast.m4a"));
+const mp3 = process.argv[3] ? readFileSync(process.argv[3]) : fakeMp3(1200);
 const delay = Number(process.env.MOCK_DELAY_MS ?? 0);
 
 const chart: [string, string][] = [
@@ -117,3 +125,27 @@ createServer((req, res) => {
 createServer(mockLastfmHandler(users)).listen(LASTFM_PORT, "127.0.0.1", () =>
   console.log(`Mock Last.fm on http://127.0.0.1:${LASTFM_PORT}/2.0/ with users ${users.map((u) => u.name).join(", ")}`),
 );
+
+// The same made-up songs on a mock iTunes, with a year-end chart per hit year.
+const itunesSongs = tracks.map((t, i) => ({
+  id: 800_000 + i,
+  title: t.title,
+  artist: t.artist,
+  releaseDate: `${t.releaseDate ?? "2015-01-01"}T08:00:00Z`,
+}));
+const charts = Object.fromEntries(
+  hitYears.map((year) => [
+    year,
+    tracks
+      .filter((t, i) => i < chart.length && yearOf(i) === year)
+      .map((t, position) => ({ position: position + 1, title: t.title, artist: t.artist })),
+  ]),
+);
+// What `pnpm check:services` searches for.
+itunesSongs.push({ id: 899_999, title: "Hey Ya!", artist: "OutKast", releaseDate: "2003-09-09T07:00:00Z" });
+void startMockApple(itunesSongs, m4a, {
+  charts,
+  mostPlayed: [800_000 + 14, 800_000 + 6],
+  port: APPLE_PORT,
+  delayMs: delay,
+}).then(() => console.log(`Mock iTunes, Apple chart and Wikipedia on http://127.0.0.1:${APPLE_PORT}`));

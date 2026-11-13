@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "check:services": "tsx scripts/check-services.ts"
   },
   "dependencies": {
     "@splitsecond/shared": "workspace:*",

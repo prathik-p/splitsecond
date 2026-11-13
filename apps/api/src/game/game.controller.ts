@@ -36,12 +36,12 @@ export class GameController {
     return this.game.unlock(id, body?.seconds);
   }
 
-  /** Audio is proxied so the browser never sees the Deezer id or preview URL. */
+  /** Audio is proxied so the browser never sees the track's id or preview URL. */
   @Get("rounds/:id/audio")
-  @Header("Content-Type", "audio/mpeg")
   @Header("Cache-Control", "no-store")
   async audio(@Param("id") id: string) {
-    return new StreamableFile(await this.game.audio(id));
+    const clip = await this.game.audio(id);
+    return new StreamableFile(clip.data, { type: clip.contentType });
   }
 
   @Post("rounds/:id/guess")

@@ -6,7 +6,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RUN_LENGTH } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { DeezerService } from "../deezer/deezer.service";
+import { CatalogService } from "../catalog/catalog.service";
 import { GameService } from "../game/game.service";
 import { ProfilesService } from "./profiles.service";
 import { fakeMp3, MockTrack, startMockDeezer, startMockLastfm } from "../../test/fixtures";
@@ -60,13 +60,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Last.fm import", () => {
     deezer = await startMockDeezer(deezerTracks, fakeMp3(100));
     lastfm = await startMockLastfm(lastfmUsers);
     process.env.DEEZER_API_BASE = deezer.url;
+    process.env.MUSIC_PROVIDER = "deezer";
     process.env.LASTFM_API_BASE = lastfm.url;
     process.env.LASTFM_API_KEY = "test-key";
     prisma = new PrismaService();
     await prisma.$connect();
-    const deezerService = new DeezerService();
-    profiles = new ProfilesService(prisma, deezerService);
-    game = new GameService(prisma, deezerService);
+    const music = new CatalogService(prisma);
+    profiles = new ProfilesService(prisma, music);
+    game = new GameService(prisma, music);
     await cleanup();
   });
 

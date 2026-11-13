@@ -10,13 +10,13 @@ import {
 import { Prisma, Profile, Track } from "@prisma/client";
 import { ProfileState, songKey } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { DeezerService } from "../deezer/deezer.service";
+import { CatalogService } from "../catalog/catalog.service";
 import { LASTFM_USERNAME, LastfmClient, LastfmError, LastfmTrack } from "../lastfm/lastfm-client";
 import { pickMatch } from "./match";
 
 const SOURCE = "lastfm";
 const LOVED_LIMIT = 100;
-/** Lookups run side by side; the Deezer client's rate limiter still caps the request rate. */
+/** Lookups run side by side; each music client's own rate limiter still caps the request rate. */
 const WORKERS = 4;
 
 @Injectable()
@@ -26,7 +26,7 @@ export class ProfilesService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly deezer: DeezerService,
+    private readonly music: CatalogService,
   ) {}
 
   /** Imports run in this process, so any left "running" by a restart will never finish. */
@@ -159,7 +159,7 @@ export class ProfilesService implements OnModuleInit {
       await Promise.all(Array.from({ length: WORKERS }, worker));
 
       if (wanted.size > 0 && failures === wanted.size) {
-        throw new Error("Couldn't reach Deezer to match the songs. Try again in a minute.");
+        throw new Error("Couldn't reach the music catalog to match the songs. Try again in a minute.");
       }
 
       await this.prisma.$transaction([
@@ -179,38 +179,39 @@ export class ProfilesService implements OnModuleInit {
     }
   }
 
-  /** Find or create the Track for a song from another service. null if Deezer doesn't have it. */
+  /** Find or create the Track for a song from another service. null if the catalog doesn't have it. */
   private async resolve(key: string, wanted: LastfmTrack): Promise<Track | null> {
     const known = await this.prisma.track.findFirst({ where: { songKey: key }, orderBy: { rank: "desc" } });
     if (known) return known;
 
-    const hit = pickMatch(wanted.title, wanted.artist, await this.deezer.client.search(wanted.title, wanted.artist));
+    const catalog = this.music.catalog;
+    const hit = pickMatch(wanted.title, wanted.artist, await catalog.search(wanted.title, wanted.artist));
     if (!hit) return null;
 
-    const deezerId = BigInt(hit.id);
-    const byId = await this.prisma.track.findUnique({ where: { deezerId } });
+    const idField = hit.provider === "deezer" ? { deezerId: BigInt(hit.id) } : { itunesId: BigInt(hit.id) };
+    const byId = await this.prisma.track.findFirst({ where: idField });
     if (byId) return byId;
 
-    // Search results carry no ISRC; the track endpoint does. It is what lets two
-    // Deezer ids for the same recording collapse into one Track.
-    const full = await this.deezer.client.track(hit.id).catch(() => hit);
+    // Deezer's search results carry no ISRC; its track endpoint does. The ISRC is what
+    // lets two ids for the same recording collapse into one Track. iTunes has none.
+    const full = hit.provider === "deezer" ? ((await catalog.track(hit.id)) ?? hit) : hit;
     if (full.isrc) {
       const byIsrc = await this.prisma.track.findUnique({ where: { isrc: full.isrc } });
       if (byIsrc) return byIsrc;
     }
 
-    const title = full.title_short ?? full.title;
     try {
       return await this.prisma.track.create({
         data: {
-          deezerId,
-          isrc: full.isrc ?? null,
-          title,
-          artist: full.artist.name,
-          album: full.album?.title ?? null,
-          coverUrl: full.album?.cover_medium ?? null,
-          rank: full.rank ?? hit.rank ?? 0,
-          songKey: songKey(title, full.artist.name),
+          ...idField,
+          isrc: full.isrc,
+          title: full.title,
+          artist: full.artist,
+          album: full.album,
+          coverUrl: full.coverUrl,
+          previewUrl: hit.provider === "itunes" ? full.previewUrl : null,
+          rank: full.rank || hit.rank,
+          songKey: songKey(full.title, full.artist),
           // Imported songs are played through their profile, not the default pool.
           inPool: false,
         },
@@ -219,7 +220,7 @@ export class ProfilesService implements OnModuleInit {
       // Another worker (or another import) created it first.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         return this.prisma.track.findFirst({
-          where: { OR: [{ deezerId }, ...(full.isrc ? [{ isrc: full.isrc }] : [])] },
+          where: { OR: [idField, ...(full.isrc ? [{ isrc: full.isrc }] : [])] },
         });
       }
       throw err;

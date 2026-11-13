@@ -12,8 +12,7 @@ import {
   snapSeconds,
 } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { DeezerService } from "../deezer/deezer.service";
-import { sliceMp3 } from "../audio/mp3";
+import { CatalogService, Clip } from "../catalog/catalog.service";
 
 type RoundWithTrack = Round & { track: Track; run: { profiles: { id: string }[] } };
 
@@ -34,7 +33,7 @@ const STATUS: Record<RoundStatus, RoundState["status"]> = {
 export class GameService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly deezer: DeezerService,
+    private readonly music: CatalogService,
   ) {}
 
   /** Every guessable song, one entry per song even if the pool has several releases. */
@@ -88,9 +87,20 @@ export class GameService {
 
     const pool = await this.prisma.track.findMany({
       where: poolWhere(profile ? [profile.id] : []),
-      select: { id: true, songKey: true },
+      select: {
+        id: true,
+        songKey: true,
+        rank: true,
+        profiles: profile ? { where: { profileId: profile.id }, select: { playcount: true } } : false,
+      },
       orderBy: { rank: "desc" },
     });
+    if (profile) {
+      // Where the catalog gives no popularity (iTunes), the listener's own play count
+      // decides what counts as easy.
+      const plays = (t: (typeof pool)[number]) => t.profiles?.[0]?.playcount ?? 0;
+      pool.sort((a, b) => b.rank - a.rank || plays(b) - plays(a));
+    }
     const distinct = new Set(pool.map((t) => t.songKey));
     if (distinct.size < RUN_LENGTH) {
       throw new ConflictException(
@@ -159,12 +169,11 @@ export class GameService {
   }
 
   /** The unlocked part of the preview while playing, the whole preview once the round is over. */
-  async audio(roundId: string): Promise<Buffer> {
+  async audio(roundId: string): Promise<Clip> {
     const round = await this.loadRound(roundId);
-    const full = await this.deezer.preview(round.track.deezerId);
-    if (round.status !== "PLAYING") return full;
+    if (round.status !== "PLAYING") return this.music.clip(round.track, Infinity);
     await this.assertCurrent(round);
-    return sliceMp3(full, round.unlockedSeconds).mp3;
+    return this.music.clip(round.track, round.unlockedSeconds);
   }
 
   async guess(roundId: string, guessedTrackId: unknown): Promise<GuessResult> {

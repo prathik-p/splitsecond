@@ -11,13 +11,17 @@ datasource db {
 /// sources to tracks through TrackSource without changing this table.
 model Track {
   id         String   @id @default(cuid())
-  deezerId   BigInt   @unique
+  /// Where the audio comes from: a track has a Deezer id, an iTunes id, or both.
+  deezerId   BigInt?  @unique
+  itunesId   BigInt?  @unique
+  /// Last known preview URL (iTunes). Refreshed by a lookup if it stops working.
+  previewUrl String?
   isrc       String?  @unique
   title      String
   artist     String
   album      String?
   coverUrl   String?
-  /// Deezer popularity rank. Higher is more popular, so easier.
+  /// Popularity, higher is easier: Deezer's rank, or one derived from a chart position.
   rank       Int
   /// The year the song was a hit, when it came from a by-year seed.
   year       Int?

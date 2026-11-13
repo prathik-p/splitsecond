@@ -6,7 +6,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RUN_LENGTH, basePoints, songKey } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { DeezerService } from "../deezer/deezer.service";
+import { CatalogService } from "../catalog/catalog.service";
 import { GameService } from "./game.service";
 import { FRAME_BYTES, fakeMp3, startMockDeezer, MockTrack } from "../../test/fixtures";
 
@@ -29,9 +29,10 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
   beforeAll(async () => {
     mock = await startMockDeezer(tracks, fakeMp3(1200));
     process.env.DEEZER_API_BASE = mock.url;
+    process.env.MUSIC_PROVIDER = "deezer";
     prisma = new PrismaService();
     await prisma.$connect();
-    game = new GameService(prisma, new DeezerService());
+    game = new GameService(prisma, new CatalogService(prisma));
 
     // Park any real pool so runs draw only from the test songs.
     const existing = await prisma.track.findMany({ where: { inPool: true }, select: { id: true } });
@@ -83,12 +84,12 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     const run = await newRun();
     const id = run.rounds[0].roundId;
 
-    const first = await game.audio(id);
+    const first = (await game.audio(id)).data;
     expect(first.length).toBeLessThanOrEqual(8 * FRAME_BYTES); // 0.1s plus decoder margin
 
     expect((await game.unlock(id, 2.07)).unlockedSeconds).toBe(2);
     expect((await game.unlock(id, 0.5)).unlockedSeconds).toBe(2);
-    const more = await game.audio(id);
+    const more = (await game.audio(id)).data;
     expect(more.length).toBeGreaterThan(first.length);
     expect(more.length).toBeLessThan(90 * FRAME_BYTES); // ~2s, nowhere near the full clip
 
@@ -135,7 +136,9 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     // A finished round can't be played again, but its full preview is available.
     await expect(game.guess(r0.roundId, answer0.id)).rejects.toThrow(/already over/);
     await expect(game.unlock(r0.roundId, 30)).rejects.toThrow(/already over/);
-    expect((await game.audio(r0.roundId)).length).toBe(1200 * FRAME_BYTES);
+    const full = await game.audio(r0.roundId);
+    expect(full.data.length).toBe(1200 * FRAME_BYTES);
+    expect(full.contentType).toBe("audio/mpeg");
 
     const gaveUp = await game.giveUp(r1.roundId);
     expect(gaveUp.round.status).toBe("given_up");
