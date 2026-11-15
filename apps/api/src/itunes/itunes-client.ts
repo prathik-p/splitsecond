@@ -19,6 +19,7 @@ interface ItunesSong {
   artworkUrl100?: string;
   previewUrl?: string;
   releaseDate?: string;
+  primaryGenreName?: string;
 }
 
 interface ItunesResponse {
@@ -179,6 +180,7 @@ function toTrack(song: ItunesSong): CatalogTrack | null {
     coverUrl: song.artworkUrl100?.replace(/\/100x100(bb)?\./, "/300x300$1.") ?? null,
     rank: 0,
     isrc: null,
+    genre: song.primaryGenreName?.trim() || null,
     releaseDate: song.releaseDate ?? null,
     previewUrl: song.previewUrl ?? null,
     playable: !!song.previewUrl,

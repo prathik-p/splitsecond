@@ -1,9 +1,9 @@
 import type {
   GuessResult,
-  PoolSummary,
+  PoolOptions,
   PoolTrack,
-  ProfileState,
   RoundState,
+  RunFilters,
   RunState,
 } from "@splitsecond/shared";
 
@@ -30,16 +30,13 @@ const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) });
 
 export const api = {
-  poolSummary: () => request<PoolSummary>("/pool/summary"),
+  poolOptions: () => request<PoolOptions>("/pool/options"),
   runPool: (runId: string) => request<PoolTrack[]>(`/runs/${runId}/pool`),
-  createRun: (profileId?: string | null) => post<RunState>("/runs", { profileId: profileId ?? undefined }),
+  createRun: (filters: RunFilters) => post<RunState>("/runs", filters),
   getRun: (runId: string) => request<RunState>(`/runs/${runId}`),
   unlock: (roundId: string, seconds: number) => post<RoundState>(`/rounds/${roundId}/unlock`, { seconds }),
   guess: (roundId: string, trackId: string) => post<GuessResult>(`/rounds/${roundId}/guess`, { trackId }),
   giveUp: (roundId: string) => post<GuessResult>(`/rounds/${roundId}/give-up`),
-  profiles: () => request<ProfileState[]>("/profiles"),
-  profile: (id: string) => request<ProfileState>(`/profiles/${id}`),
-  importProfile: (username: string, refresh = false) => post<ProfileState>("/profiles", { username, refresh }),
   async audio(roundId: string): Promise<ArrayBuffer> {
     const res = await fetch(`/api/rounds/${roundId}/audio`, { cache: "no-store" });
     if (!res.ok) throw new Error("Couldn't load the audio for this song");

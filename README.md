@@ -4,8 +4,8 @@ Name the song in a split second. Each round starts with a 0.1s clip; drag the
 log-scaled scrubber to unlock more, at a cost. A run is five songs, ordered easy to hard.
 
 Open it and play: no account or name. Songs are the Billboard year-end hits of each year
-from 2000 to now, or a Last.fm listener's own top and loved tracks. Audio comes from
-Apple's public iTunes previews. Your best score is kept in the browser.
+from 2000 to now. Run options in the lobby narrow a run to chosen genres and artists.
+Audio comes from Apple's public iTunes previews. Your best score is kept in the browser.
 
 ## Run it
 
@@ -20,9 +20,8 @@ pnpm db:seed          # fill the pool with hits (slow: see below)
 pnpm dev              # web on http://localhost:3000, API on http://localhost:4000
 ```
 
-To play from Last.fm profiles, create a free API key at
-<https://www.last.fm/api/account/create> and set `LASTFM_API_KEY` in `apps/api/.env`.
-Then add a username in the lobby.
+After pulling a newer version, run `pnpm db:migrate` again (it applies any new tables or
+columns) and `pnpm db:seed` (it fills in anything new, such as genres, for songs already saved).
 
 **The seed is slow, and that's fine.** Apple allows about 20 lookups a minute, so a full
 seed (50 songs for each of 26 years) takes around an hour. It works down the charts across
@@ -100,7 +99,16 @@ seed finds each year's hits through Deezer playlists named after the year. A tra
 carry an id for either service.
 
 **High score.** There are no accounts. The best score and the number of runs played are
-kept in `localStorage`, separately for the hits pool and for each Last.fm profile.
+kept in `localStorage`, separately for each set of run options, since a run on one artist
+isn't comparable to one on the whole pool.
+
+**Run options.** Each song's genre is the one Apple lists for it; genres too small to fill
+a run are grouped as "Other". A song counts for every act in its credit or its "(feat. …)"
+that has songs of its own in the pool, so a collaboration shows up under both artists,
+while a band like "Earth, Wind & Fire" stays one act. The lobby gets the whole list once
+(`/api/pool/options`) and counts in the browser; the server applies the same rules when it
+picks a run's songs. The autocomplete still offers the whole pool, so narrow options don't
+give the answer away.
 
 **Guessing.** Autocomplete searches the pool by normalised title and artist. A guess is
 correct if it is the same song after normalising ("feat.", "Remastered" and so on are
@@ -110,7 +118,9 @@ ignored), so picking another release of the right song counts.
 split into five bands; a run takes one random song from each, best known first. In a
 profile run, songs with no rank are ordered by how often that listener played them.
 
-**Last.fm profiles.** Adding a username fetches that user's top tracks (200 by default,
+**Last.fm profiles (server only).** The lobby no longer offers this, but the API still has
+it, for a later "several profiles in one game" mode. It needs `LASTFM_API_KEY` in
+`apps/api/.env`. Importing a username fetches that user's top tracks (200 by default,
 `LASTFM_TOP_LIMIT`) and loved tracks, merges duplicates, and matches each song to the
 music provider: a search, then the first result whose normalised title and artist match
 and that has a preview. On Deezer the track's ISRC is also looked up, so two ids for the
@@ -125,10 +135,11 @@ five songs and its autocomplete list from that profile only.
 | --- | --- | --- |
 | GET | `/api/pool` | Songs in the default (hits) pool |
 | GET | `/api/pool/summary` | Size and year range of the default pool |
+| GET | `/api/pool/options` | Genres and artists a run can be limited to, with each song's genre and artists as indexes |
 | GET | `/api/profiles` | Imported profiles and their import status |
 | POST | `/api/profiles` | Import a Last.fm user (`{ username, refresh? }`) |
 | GET | `/api/profiles/:id` | One profile, polled for import progress |
-| POST | `/api/runs` | Start a run (`{ profileId? }`) |
+| POST | `/api/runs` | Start a run (`{ genres?, artists?, profileId? }`; empty lists mean any) |
 | GET | `/api/runs/:id` | Run state, used to resume |
 | GET | `/api/runs/:id/pool` | Guessable songs for that run's autocomplete |
 | POST | `/api/rounds/:id/unlock` | `{ seconds }`, only ever increases |

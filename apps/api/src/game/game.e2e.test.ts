@@ -45,6 +45,8 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
         title: t.title,
         artist: t.artist,
         rank: t.rank,
+        // Seven pop songs, then five rock songs.
+        genre: t.id - ID_BASE < 7 ? "Pop" : "Rock",
         songKey: songKey(t.title, t.artist),
       })),
     });
@@ -66,11 +68,51 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
   const answerOf = async (roundId: string) =>
     (await prisma.round.findUniqueOrThrow({ where: { id: roundId }, include: { track: true } })).track;
 
+  it("lists the genres and artists a run can be limited to", async () => {
+    const options = await game.poolOptions();
+    expect(options.genres).toEqual(["Pop", "Rock"]);
+    expect(options.artists).toHaveLength(12);
+    expect(options.songs).toHaveLength(12);
+    expect(options.songs.filter((s) => s.g === 1)).toHaveLength(5);
+    expect(JSON.stringify(options)).not.toMatch(/Test Song/);
+  });
+
+  it("limits a run to the chosen genres and artists", async () => {
+    const rock = await game.createRun(null, null, { genres: ["Rock"] });
+    runIds.push(rock.runId);
+    expect(rock.filters).toEqual({ genres: ["Rock"], artists: [] });
+    const rockAnswers = await Promise.all(rock.rounds.map((r) => answerOf(r.roundId)));
+    expect(rockAnswers.map((t) => t.genre)).toEqual(Array(RUN_LENGTH).fill("Rock"));
+    // Still easy to hard within the narrowed pool.
+    expect(rockAnswers.map((t) => t.rank)).toEqual([...rockAnswers.map((t) => t.rank)].sort((a, b) => b - a));
+    expect((await game.getRun(rock.runId)).filters).toEqual({ genres: ["Rock"], artists: [] });
+
+    const names = [1, 3, 5, 8, 10, 11].map((i) => `Test Artist ${i}`);
+    const picked = await game.createRun(null, null, { artists: names });
+    runIds.push(picked.runId);
+    const artists = (await Promise.all(picked.rounds.map((r) => answerOf(r.roundId)))).map((t) => t.artist);
+    expect(artists.every((a) => names.includes(a))).toBe(true);
+    expect(new Set(artists).size).toBe(RUN_LENGTH);
+
+    // Songs outside the options can still be guessed (and are simply wrong).
+    const [first] = picked.rounds;
+    const outsider = await prisma.track.findFirstOrThrow({ where: { deezerId: BigInt(ID_BASE) } });
+    expect((await game.guess(first.roundId, outsider.id)).correct).toBe(false);
+  });
+
+  it("refuses options that leave too few songs, saying how many there are", async () => {
+    await expect(game.createRun(null, null, { genres: ["Pop"], artists: ["Test Artist 2", "Test Artist 9"] })).rejects.toThrow(
+      /Only 1 song matches these options/,
+    );
+    await expect(game.createRun(null, null, { artists: ["Nobody At All"] })).rejects.toThrow(/Only 0 songs match/);
+  });
+
   it("builds a 5-song run ordered easy to hard, without leaking answers", async () => {
     const run = await newRun();
     expect(run.rounds).toHaveLength(RUN_LENGTH);
     expect(run.nickname).toBe("tester");
     expect(run.source).toBeNull();
+    expect(run.filters).toEqual({ genres: [], artists: [] });
     expect(run.rounds.every((r) => r.answer === null && r.status === "playing")).toBe(true);
     expect(JSON.stringify(run)).not.toMatch(/Test Song|9900000/);
 

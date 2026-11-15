@@ -208,6 +208,8 @@ export interface MockItunesSong {
   releaseDate?: string;
   /** false: listed but without a preview. */
   preview?: boolean;
+  /** Apple's primaryGenreName. */
+  genre?: string;
 }
 
 /** Wikipedia-style year-end page: one wikitable of position / title / artist. */
@@ -278,6 +280,7 @@ export async function startMockApple(
       artworkUrl100: `${base}/art/${s.id}/100x100bb.jpg`,
       previewUrl: s.preview === false ? undefined : `${base}${control.previewPath}/${s.id}.m4a`,
       releaseDate: s.releaseDate,
+      primaryGenreName: s.genre,
     });
 
     if (url.pathname === "/search") {

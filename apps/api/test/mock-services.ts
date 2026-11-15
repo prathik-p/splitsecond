@@ -22,6 +22,7 @@ import {
   fakeMp3,
   mockDeezerHandler,
   mockLastfmHandler,
+  MockItunesSong,
   MockLastfmUser,
   MockPlaylist,
   MockTrack,
@@ -127,11 +128,13 @@ createServer(mockLastfmHandler(users)).listen(LASTFM_PORT, "127.0.0.1", () =>
 );
 
 // The same made-up songs on a mock iTunes, with a year-end chart per hit year.
-const itunesSongs = tracks.map((t, i) => ({
+const genres = ["Pop", "Alternative", "Pop", "Hip-Hop/Rap"];
+const itunesSongs: MockItunesSong[] = tracks.map((t, i) => ({
   id: 800_000 + i,
   title: t.title,
   artist: t.artist,
   releaseDate: `${t.releaseDate ?? "2015-01-01"}T08:00:00Z`,
+  genre: genres[i % genres.length],
 }));
 const charts = Object.fromEntries(
   hitYears.map((year) => [

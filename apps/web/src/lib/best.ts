@@ -1,16 +1,14 @@
 /**
- * Personal bests, kept in this browser only. One per song source, since a run
- * on your own Last.fm library isn't comparable to one on the hits pool.
+ * Personal bests, kept in this browser only. One per set of run options, since
+ * a run on one artist isn't comparable to one on the whole pool.
  */
 const KEY = "splitsecond.best";
-/** Source key for the default pool. Profiles use their id. */
-export const HITS = "hits";
 
 export interface Best {
   score: number;
   /** ISO date the best was set. */
   at: string;
-  /** Runs finished on this source. */
+  /** Runs finished with these options. */
   runs: number;
 }
 

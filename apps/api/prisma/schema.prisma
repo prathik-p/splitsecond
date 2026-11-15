@@ -25,6 +25,8 @@ model Track {
   rank       Int
   /// The year the song was a hit, when it came from a by-year seed.
   year       Int?
+  /// The catalog's genre for the song ("Pop", "Hip-Hop/Rap"), where it gives one.
+  genre      String?
   /// Normalised "title::artist", used to treat re-releases as the same song.
   songKey    String
   inPool     Boolean  @default(true)
@@ -58,6 +60,9 @@ model Run {
   totalScore Int       @default(0)
   createdAt  DateTime  @default(now())
   finishedAt DateTime?
+  /// Run options: the genres and artists the songs were limited to. Empty means any.
+  genres     String[]  @default([])
+  artists    String[]  @default([])
 
   rounds   Round[]
   /// Profiles whose songs this run draws from. Empty means the default pool.

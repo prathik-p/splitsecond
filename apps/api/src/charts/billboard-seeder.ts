@@ -153,6 +153,7 @@ export async function seedBillboard(
             album: hit.album,
             coverUrl: hit.coverUrl,
             previewUrl: hit.provider === "itunes" ? hit.previewUrl : null,
+            genre: hit.genre ?? null,
             rank,
             year,
             songKey: songKey(hit.title, hit.artist),

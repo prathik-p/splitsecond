@@ -8,21 +8,29 @@ import {
   basePoints,
   formatSeconds,
   scoreRound,
-  type PoolSummary,
+  type PoolOptions,
   type PoolTrack,
-  type ProfileState,
   type RoundState,
+  type RunFilters,
   type RunState,
 } from "@splitsecond/shared";
 import { api } from "@/lib/api";
-import { HITS, getBest, recordRun, type Best } from "@/lib/best";
+import { getBest, recordRun, type Best } from "@/lib/best";
+import {
+  NO_FILTERS,
+  describeChosen,
+  filtersKey,
+  isFiltered,
+  loadFilters,
+  matchingSongs,
+  saveFilters,
+} from "@/lib/run-options";
 import { SnippetPlayer, type LoadedClip } from "@/lib/snippet-player";
 import { Scrubber } from "./Scrubber";
 import { GuessInput } from "./GuessInput";
-import { SourcePicker } from "./SourcePicker";
+import { RunOptions } from "./RunOptions";
 
 const RUN_KEY = "splitsecond.run";
-const SOURCE_KEY = "splitsecond.source";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 function stored(key: string): string | null {
@@ -44,11 +52,10 @@ function store(key: string, value: string | null) {
 export function Game() {
   /** Songs that can be guessed in the current run. */
   const [pool, setPool] = useState<PoolTrack[] | null>(null);
-  /** What the default pool holds, for the lobby. */
-  const [hits, setHits] = useState<PoolSummary | null>(null);
-  const [profiles, setProfiles] = useState<ProfileState[]>([]);
-  /** Selected profile id, or null for the default pool. */
-  const [sourceId, setSourceId] = useState<string | null>(null);
+  /** The genres and artists the pool can be narrowed to, for the lobby. */
+  const [options, setOptions] = useState<PoolOptions | null>(null);
+  /** The genres and artists chosen for the next run. */
+  const [filters, setFilters] = useState<RunFilters>(NO_FILTERS);
   const [run, setRun] = useState<RunState | null>(null);
   /** True once we are in the browser, where the stored best can be read. */
   const [mounted, setMounted] = useState(false);
@@ -62,17 +69,12 @@ export function Game() {
   useEffect(() => {
     setMounted(true);
     api
-      .poolSummary()
-      .then(setHits)
-      .catch((e: Error) => setError(e.message));
-    api
-      .profiles()
-      .then((list) => {
-        setProfiles(list);
-        const saved = stored(SOURCE_KEY);
-        if (saved && list.some((p) => p.id === saved)) setSourceId(saved);
+      .poolOptions()
+      .then((o) => {
+        setOptions(o);
+        setFilters(loadFilters(o));
       })
-      .catch(() => {});
+      .catch((e: Error) => setError(e.message));
     const saved = stored(RUN_KEY);
     if (saved) {
       api
@@ -95,47 +97,17 @@ export function Game() {
     api.runPool(runId).then(setPool).catch((e: Error) => setError(e.message));
   }, [runId]);
 
-  // Follow imports that are in progress.
-  const importing = profiles.filter((p) => p.status === "running" || p.status === "pending").map((p) => p.id);
-  const importingKey = importing.join(",");
-  useEffect(() => {
-    if (!importingKey) return;
-    const ids = importingKey.split(",");
-    const timer = setInterval(() => {
-      for (const id of ids) {
-        api
-          .profile(id)
-          .then((fresh) => setProfiles((list) => list.map((p) => (p.id === fresh.id ? fresh : p))))
-          .catch(() => {});
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [importingKey]);
-
-  const selectSource = (id: string | null) => {
-    setSourceId(id);
-    store(SOURCE_KEY, id);
+  const chooseFilters = (next: RunFilters) => {
+    setFilters(next);
+    saveFilters(next);
     setError(null);
-  };
-
-  const importProfile = async (username: string, refresh = false) => {
-    setError(null);
-    try {
-      const profile = await api.importProfile(username, refresh);
-      setProfiles((list) => [profile, ...list.filter((p) => p.id !== profile.id)]);
-      selectSource(profile.id);
-      return true;
-    } catch (e) {
-      setError((e as Error).message);
-      return false;
-    }
   };
 
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.createRun(sourceId);
+      const r = await api.createRun(filters);
       store(RUN_KEY, r.runId);
       setOutcome(null);
       setRun(r);
@@ -151,14 +123,13 @@ export function Game() {
     setRun(r);
     if (r.finished) {
       store(RUN_KEY, null);
-      setOutcome(recordRun(r.source?.profileId ?? HITS, r.runId, r.totalScore));
+      setOutcome(recordRun(r.source?.profileId ?? filtersKey(r.filters), r.runId, r.totalScore));
     }
   }, []);
 
-  const selected = profiles.find((p) => p.id === sourceId) ?? null;
-  // Personal best for the selected source, read from this browser on each lobby render.
-  const best: Best | null = mounted && !run ? getBest(sourceId ?? HITS) : null;
-  const playable = selected ? selected.status === "done" && selected.matched >= RUN_LENGTH : (hits?.songs ?? 0) >= RUN_LENGTH;
+  // Personal best for the chosen options, read from this browser on each lobby render.
+  const best: Best | null = mounted && !run ? getBest(filtersKey(filters)) : null;
+  const playable = options !== null && matchingSongs(options, filters).length >= RUN_LENGTH;
 
   const round = run?.rounds[viewIndex];
   const showSummary = run && run.finished && viewIndex >= RUN_LENGTH;
@@ -210,11 +181,9 @@ export function Game() {
           onStart={start}
           busy={busy}
           playable={playable}
-          hits={hits}
-          profiles={profiles}
-          sourceId={sourceId}
-          onSelectSource={selectSource}
-          onImport={importProfile}
+          options={options}
+          filters={filters}
+          onFilters={chooseFilters}
           best={best}
         />
       )}
@@ -224,7 +193,9 @@ export function Game() {
           key={round.roundId}
           round={round}
           pool={pool}
-          sourceLabel={run.source ? `${run.source.displayName}'s Last.fm` : null}
+          sourceLabel={
+            run.source ? `${run.source.displayName}'s Last.fm` : describeChosen(run.filters)
+          }
           isLast={viewIndex === RUN_LENGTH - 1}
           onRunChange={onRunChange}
           onError={setError}
@@ -253,11 +224,10 @@ function Lobby(props: {
   onStart: () => void;
   busy: boolean;
   playable: boolean;
-  hits: PoolSummary | null;
-  profiles: ProfileState[];
-  sourceId: string | null;
-  onSelectSource: (id: string | null) => void;
-  onImport: (username: string, refresh?: boolean) => Promise<boolean>;
+  /** null while the pool is loading. */
+  options: PoolOptions | null;
+  filters: RunFilters;
+  onFilters: (next: RunFilters) => void;
   best: Best | null;
 }) {
   return (
@@ -265,17 +235,14 @@ function Lobby(props: {
       <h1>
         Name the song in <em>a split second</em>.
       </h1>
-      <p className="lede">
-        Five songs, easy to hard. Each starts at {formatSeconds(0.1)}. Unlock more if you need it, but every extra
-        moment costs points, and so does every wrong guess.
-      </p>
-      <SourcePicker
-        hits={props.hits}
-        profiles={props.profiles}
-        selectedId={props.sourceId}
-        onSelect={props.onSelectSource}
-        onImport={props.onImport}
-      />
+      {props.options !== null &&
+        (props.options.songs.length < RUN_LENGTH ? (
+          <p className="hint">
+            The song pool is empty. Run <code>pnpm db:seed</code> to fill it.
+          </p>
+        ) : (
+          <RunOptions options={props.options} value={props.filters} onChange={props.onFilters} />
+        ))}
       <div className="start">
         <button
           className="btn btn-primary btn-big"
@@ -288,7 +255,9 @@ function Lobby(props: {
         <p className="best" data-testid="best">
           {props.best ? (
             <>
-              <span className="best-label">Your best</span>
+              <span className="best-label">
+                {isFiltered(props.filters) ? "Your best with these options" : "Your best"}
+              </span>
               <b>{fmt(props.best.score)}</b>
               <span className="best-meta">
                 {props.best.runs} {props.best.runs === 1 ? "run" : "runs"} played

@@ -3,16 +3,19 @@ import { Prisma, Round, RoundStatus, Track } from "@prisma/client";
 import {
   GuessResult,
   LeaderboardEntry,
+  PoolOptions,
   PoolSummary,
   PoolTrack,
   RUN_LENGTH,
   RoundState,
+  RunFilters,
   RunState,
   scoreRound,
   snapSeconds,
 } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { CatalogService, Clip } from "../catalog/catalog.service";
+import { buildOptions, cleanFilters, matchingKeys } from "./pool-options";
 
 type RoundWithTrack = Round & { track: Track; run: { profiles: { id: string }[] } };
 
@@ -61,6 +64,16 @@ export class GameService {
     return { songs: songs.length, yearFrom: years._min.year, yearTo: years._max.year };
   }
 
+  /** The genres and artists the default pool can be narrowed to. */
+  async poolOptions(): Promise<PoolOptions> {
+    const tracks = await this.prisma.track.findMany({
+      where: { inPool: true },
+      select: { title: true, artist: true, genre: true, songKey: true },
+      orderBy: [{ rank: "desc" }, { id: "asc" }],
+    });
+    return buildOptions(tracks).options;
+  }
+
   async runPool(runId: string): Promise<PoolTrack[]> {
     const run = await this.prisma.run.findUnique({
       where: { id: runId },
@@ -73,9 +86,16 @@ export class GameService {
   /**
    * Pick RUN_LENGTH songs from the pool, ordered easy to hard: the pool is
    * sorted by Deezer rank and split into RUN_LENGTH bands, one song per band.
-   * With a profile, the pool is that profile's imported songs.
+   * With a profile, the pool is that profile's imported songs. Run options narrow
+   * the pool to chosen genres and artists first.
    */
-  async createRun(nickname?: string | null, profileId?: string | null): Promise<RunState> {
+  async createRun(
+    nickname?: string | null,
+    profileId?: string | null,
+    options: { genres?: unknown; artists?: unknown } = {},
+  ): Promise<RunState> {
+    const filters = cleanFilters(options.genres, options.artists);
+    const filtered = filters.genres.length > 0 || filters.artists.length > 0;
     let profile: { id: string; displayName: string } | null = null;
     if (profileId) {
       profile = await this.prisma.profile.findUnique({
@@ -85,10 +105,13 @@ export class GameService {
       if (!profile) throw new NotFoundException("Profile not found");
     }
 
-    const pool = await this.prisma.track.findMany({
+    let pool = await this.prisma.track.findMany({
       where: poolWhere(profile ? [profile.id] : []),
       select: {
         id: true,
+        title: true,
+        artist: true,
+        genre: true,
         songKey: true,
         rank: true,
         profiles: profile ? { where: { profileId: profile.id }, select: { playcount: true } } : false,
@@ -101,10 +124,16 @@ export class GameService {
       const plays = (t: (typeof pool)[number]) => t.profiles?.[0]?.playcount ?? 0;
       pool.sort((a, b) => b.rank - a.rank || plays(b) - plays(a));
     }
+    if (filtered) {
+      const keys = matchingKeys(buildOptions(pool), filters);
+      pool = pool.filter((t) => keys.has(t.songKey));
+    }
     const distinct = new Set(pool.map((t) => t.songKey));
     if (distinct.size < RUN_LENGTH) {
       throw new ConflictException(
-        profile
+        filtered
+          ? `Only ${distinct.size} ${distinct.size === 1 ? "song matches" : "songs match"} these options. A run needs ${RUN_LENGTH}, so pick more genres or artists.`
+          : profile
           ? `${profile.displayName} needs at least ${RUN_LENGTH} matched songs to play.`
           : `The song pool needs at least ${RUN_LENGTH} songs. Run the seed first.`,
       );
@@ -127,6 +156,8 @@ export class GameService {
     const run = await this.prisma.run.create({
       data: {
         nickname: clean,
+        genres: filters.genres,
+        artists: filters.artists,
         ...(profile ? { profiles: { connect: { id: profile.id } } } : {}),
         rounds: { create: picked.map((trackId, index) => ({ trackId, index })) },
       },
@@ -148,6 +179,7 @@ export class GameService {
       runId: run.id,
       nickname: run.nickname,
       source: profile ? { profileId: profile.id, displayName: profile.displayName } : null,
+      filters: { genres: run.genres, artists: run.artists } satisfies RunFilters,
       totalScore: run.totalScore,
       finished: run.finishedAt !== null,
       rounds: run.rounds.map(toRoundState),

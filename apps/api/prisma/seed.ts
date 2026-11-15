@@ -10,6 +10,7 @@
  *   - the Billboard Year-End Hot 100 of each year, read from Wikipedia, with each
  *     song matched to Apple's iTunes catalog for its preview
  *   - Apple's current chart, which covers the year in progress
+ *   - each song's genre, for the lobby's run options (filled in for older songs too)
  *   Apple allows about 20 lookups a minute, so a full seed takes around an hour.
  *   It works down the charts across all years at once: stop it whenever you
  *   like and the pool is already playable; run it again to continue.
@@ -31,6 +32,7 @@ import { activeProvider } from "../src/catalog/catalog.service";
 import { seedHits } from "../src/catalog/hits-seeder";
 import { seedAppleChart } from "../src/charts/apple-chart";
 import { seedBillboard } from "../src/charts/billboard-seeder";
+import { fillGenres } from "../src/charts/genres";
 import { WikipediaCharts } from "../src/charts/wikipedia-charts";
 import { DeezerClient, DeezerTrack } from "../src/deezer/deezer-client";
 import { ItunesClient } from "../src/itunes/itunes-client";
@@ -58,6 +60,17 @@ async function seedFromItunes() {
           : `${reason}; trying again in ${seconds}s`,
       ),
   });
+
+  const untagged = await prisma.track.count({ where: { itunesId: { not: null }, genre: null } });
+  if (untagged > 0) {
+    console.log(`Adding genres to ${untagged} songs already saved…`);
+    try {
+      const { filled, missing } = await fillGenres(prisma, itunes);
+      console.log(`  ${filled} songs now have a genre${missing ? `; Apple lists none for ${missing}` : ""}.`);
+    } catch (err) {
+      console.log(`  Stopped: ${(err as Error).message}. The next seed continues.`);
+    }
+  }
 
   console.log("Adding Apple's current chart…");
   try {

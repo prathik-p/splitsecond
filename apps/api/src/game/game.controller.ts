@@ -16,9 +16,15 @@ export class GameController {
     return this.game.poolSummary();
   }
 
+  /** Genres and artists the default pool can be narrowed to, for the lobby's run options. */
+  @Get("pool/options")
+  poolOptions() {
+    return this.game.poolOptions();
+  }
+
   @Post("runs")
-  createRun(@Body() body: { nickname?: string; profileId?: string } = {}) {
-    return this.game.createRun(body?.nickname, body?.profileId);
+  createRun(@Body() body: { nickname?: string; profileId?: string; genres?: string[]; artists?: string[] } = {}) {
+    return this.game.createRun(body?.nickname, body?.profileId, { genres: body?.genres, artists: body?.artists });
   }
 
   @Get("runs/:id/pool")

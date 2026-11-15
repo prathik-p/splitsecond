@@ -89,7 +89,12 @@ export async function seedAppleChart(
     const track = existing
       ? await prisma.track.update({
           where: { id: existing.id },
-          data: { inPool: true, year: existing.year ?? released, rank: Math.max(existing.rank, rank) },
+          data: {
+            inPool: true,
+            year: existing.year ?? released,
+            rank: Math.max(existing.rank, rank),
+            genre: existing.genre ?? t.genre ?? null,
+          },
         })
       : await prisma.track.create({
           data: {
@@ -99,6 +104,7 @@ export async function seedAppleChart(
             album: t.album,
             coverUrl: t.coverUrl,
             previewUrl: t.previewUrl,
+            genre: t.genre ?? null,
             rank,
             year: released,
             songKey: key,

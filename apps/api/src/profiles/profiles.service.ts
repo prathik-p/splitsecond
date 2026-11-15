@@ -210,6 +210,7 @@ export class ProfilesService implements OnModuleInit {
           album: full.album,
           coverUrl: full.coverUrl,
           previewUrl: hit.provider === "itunes" ? full.previewUrl : null,
+          genre: full.genre ?? null,
           rank: full.rank || hit.rank,
           songKey: songKey(full.title, full.artist),
           // Imported songs are played through their profile, not the default pool.

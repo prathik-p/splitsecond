@@ -12,6 +12,7 @@ import { CatalogService } from "../catalog/catalog.service";
 import { GameService } from "../game/game.service";
 import { ItunesClient } from "../itunes/itunes-client";
 import { currentChartIds, seedAppleChart } from "./apple-chart";
+import { fillGenres } from "./genres";
 import { seedBillboard } from "./billboard-seeder";
 import { WikipediaCharts } from "./wikipedia-charts";
 import { MockItunesSong, startMockApple } from "../../test/fixtures";
@@ -20,12 +21,12 @@ const ID = 960_000_000;
 const m4a = readFileSync(join(__dirname, "../../test/data/tone-fast.m4a")); // 3 seconds
 
 const songs: MockItunesSong[] = [
-  { id: ID + 1, title: "First Of 2005", artist: "Alpha", releaseDate: "2005-01-10T08:00:00Z" },
+  { id: ID + 1, title: "First Of 2005", artist: "Alpha", releaseDate: "2005-01-10T08:00:00Z", genre: "Pop" },
   { id: ID + 2, title: "Second Of 2005 (feat. Guest)", artist: "Beta", releaseDate: "2004-11-01T08:00:00Z" },
   { id: ID + 3, title: "Third Of 2005", artist: "Gamma Karaoke Crew", releaseDate: "2012-01-01T08:00:00Z" },
   { id: ID + 4, title: "Fourth Of 2005", artist: "D!lta", releaseDate: "2005-05-05T08:00:00Z" },
   { id: ID + 5, title: "No Preview Song", artist: "Epsilon", preview: false },
-  { id: ID + 6, title: "First Of 2006", artist: "Zeta", releaseDate: "2006-02-02T08:00:00Z" },
+  { id: ID + 6, title: "First Of 2006", artist: "Zeta", releaseDate: "2006-02-02T08:00:00Z", genre: "Hip-Hop/Rap" },
   { id: ID + 7, title: "Second Of 2006", artist: "Eta", releaseDate: "2006-03-03T08:00:00Z" },
   { id: ID + 8, title: "Third Of 2006", artist: "Theta", releaseDate: "2006-04-04T08:00:00Z" },
   { id: ID + 9, title: "Right Now Hit", artist: "Iota", releaseDate: "2026-06-01T08:00:00Z" },
@@ -100,6 +101,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
     ]);
     expect(saved.every((t) => t.inPool && t.deezerId === null && t.previewUrl?.endsWith(".m4a"))).toBe(true);
     expect(saved[0].coverUrl).toMatch(/300x300bb\.jpg$/);
+    expect(saved.map((t) => t.genre)).toEqual(["Pop", null, null, "Hip-Hop/Rap", null, null]);
 
     // On both years' charts: keeps the first year and the better position.
     const first = saved[0];
@@ -107,6 +109,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
     expect(first.rank).toBe(1_000_000);
     expect(first.sources.map((s) => s.reference).sort()).toEqual(["2005:1", "2006:2"]);
     expect(saved[2]).toMatchObject({ artist: "D!lta", year: 2005, rank: 970_000 });
+  });
+
+  it("fills in the genre of songs saved before genres were stored", async () => {
+    await prisma.track.updateMany({ where: mine, data: { genre: null } });
+    const lookups = mock.stats().lookups;
+    // Two of the six saved songs have a genre on the mock; one lookup covers them all.
+    expect(await fillGenres(prisma, itunes)).toMatchObject({ filled: 2 });
+    expect(mock.stats().lookups - lookups).toBe(1);
+    const tagged = await prisma.track.findMany({ where: { ...mine, genre: { not: null } }, orderBy: { itunesId: "asc" } });
+    expect(tagged.map((t) => [t.title, t.genre])).toEqual([
+      ["First Of 2005", "Pop"],
+      ["First Of 2006", "Hip-Hop/Rap"],
+    ]);
   });
 
   it("re-running only retries the entries that were missed", async () => {

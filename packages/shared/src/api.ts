@@ -14,6 +14,24 @@ export interface PoolSummary {
   yearTo: number | null;
 }
 
+/**
+ * What a run can be limited to, for the lobby's run options. Kept compact:
+ * songs point into the two name lists.
+ */
+export interface PoolOptions {
+  /** Genre names, biggest first. */
+  genres: string[];
+  artists: string[];
+  /** One entry per song: g is its genre's index (-1 if unknown), a its artists' indexes. */
+  songs: { g: number; a: number[] }[];
+}
+
+/** The genres and artists a run is limited to. An empty list means any. */
+export interface RunFilters {
+  genres: string[];
+  artists: string[];
+}
+
 export interface RoundState {
   roundId: string;
   index: number;
@@ -56,6 +74,8 @@ export interface RunState {
   runId: string;
   nickname: string | null;
   source: RunSource | null;
+  /** The run options it was started with. */
+  filters: RunFilters;
   totalScore: number;
   finished: boolean;
   rounds: RoundState[];
