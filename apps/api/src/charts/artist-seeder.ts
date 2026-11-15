@@ -3,12 +3,15 @@ import { normalizeArtist, normalizeTitle, songKey } from "@splitsecond/shared";
 import type { CatalogTrack } from "../catalog/types";
 import type { ItunesAlbum, ItunesArtist, ItunesClient } from "../itunes/itunes-client";
 import { sameArtist } from "../profiles/match";
+import { isAlternateRelease, isAlternateVersion } from "./release-rules";
 
 /**
- * Adds the whole catalogue of chosen artists to the pool: every album, EP and
- * single Apple files under the artist, one song per song however many
- * releases it has. These songs are marked catalogOnly, so they come up only
- * when their artist is picked in the run options.
+ * Adds the whole catalogue of chosen artists to the pool: the original studio
+ * recording of every song on the albums, EPs and singles Apple files under the
+ * artist, one entry per song however many releases it has. Remixes, live
+ * recordings and other alternate versions are left out (see release-rules.ts).
+ * These songs are marked catalogOnly, so they come up only when their artist
+ * is picked in the run options.
  *
  * Safe to stop and re-run: albums already read are remembered, so a later seed
  * only reads new releases.
@@ -46,8 +49,11 @@ export function artistIdFromLine(line: string): string | null {
 
 const actKey = (name: string) => normalizeArtist(name).replace(/^the /, "");
 
-/** Recordings that aren't the song itself. */
-const NOT_A_SONG = /\b(commentary|voice memo|interview|karaoke|instrumental|a\s?cappella|track by track|spoken word)\b/i;
+/**
+ * Bumped whenever the rules for what gets added change. An artist read under
+ * older rules is cleared out and read again, so the pool matches the new rules.
+ */
+export const RULES_VERSION = 2;
 /** Shorter than this is an interlude or a skit. */
 const MIN_SONG_MS = 60_000;
 
@@ -103,12 +109,18 @@ export async function seedArtists(
         }
         row = await prisma.artistImport.upsert({
           where: { itunesId: BigInt(artist.id) },
-          create: { itunesId: BigInt(artist.id), name: artist.name, query },
+          create: { itunesId: BigInt(artist.id), name: artist.name, query, rules: RULES_VERSION },
           update: { query },
         });
       }
       result.artists++;
-      result.added += await seedOne(prisma, itunes, { id: String(row.itunesId), name: row.name }, row.albumsDone, log);
+      let albumsDone = row.albumsDone;
+      if (row.rules !== RULES_VERSION) {
+        if (albumsDone.length) log(`${row.name}: reading again, this time without remixes, live versions and the like`);
+        await clearArtist(prisma, String(row.itunesId));
+        albumsDone = [];
+      }
+      result.added += await seedOne(prisma, itunes, { id: String(row.itunesId), name: row.name }, albumsDone, log);
     }
   } catch (err) {
     if (!(err as { rateLimited?: boolean }).rateLimited) throw err;
@@ -116,6 +128,21 @@ export async function seedArtists(
     result.stopped = true;
   }
   return result;
+}
+
+/** Take an artist's catalogue songs back out of the pool, so they can be read again under new rules. */
+async function clearArtist(prisma: PrismaClient, reference: string) {
+  const links = await prisma.trackSource.findMany({ where: { kind: "artist", reference }, select: { trackId: true } });
+  // Hits stay; a catalogue song stays in the database (old runs point at it) but leaves the pool.
+  await prisma.track.updateMany({
+    where: { id: { in: links.map((l) => l.trackId) }, catalogOnly: true },
+    data: { inPool: false },
+  });
+  await prisma.trackSource.deleteMany({ where: { kind: "artist", reference } });
+  await prisma.artistImport.update({
+    where: { itunesId: BigInt(reference) },
+    data: { albumsDone: [], rules: RULES_VERSION },
+  });
 }
 
 async function seedOne(
@@ -145,11 +172,15 @@ async function seedOne(
     if (!listing.has(key)) listing.set(key, listing.size);
   }
 
-  // Titles already in from this artist, so a single of an album track needn't be read.
-  const known = new Set(
+  // Songs already in from this artist, by title. A single of an album track needn't be
+  // read, and the same title under a different credit ("X & Y") is the same song.
+  const known = new Map(
     (
-      await prisma.trackSource.findMany({ where: { kind: "artist", reference }, select: { track: { select: { title: true } } } })
-    ).map((s) => normalizeTitle(s.track.title)),
+      await prisma.trackSource.findMany({
+        where: { kind: "artist", reference },
+        select: { track: { select: { id: true, title: true } } },
+      })
+    ).map((s) => [normalizeTitle(s.track.title), s.track.id]),
   );
   const markDone = async (album: ItunesAlbum) => {
     done.add(album.id);
@@ -161,7 +192,8 @@ async function seedOne(
   for (const album of todo) {
     read++;
     const single = album.trackCount <= 1 && known.has(normalizeTitle(album.name.replace(/\s+-\s+(single|ep)$/i, "")));
-    if (single) {
+    // Live albums, remix EPs and the like hold nothing wanted, so they aren't even fetched.
+    if (single || isAlternateRelease(album.name)) {
       await markDone(album);
       continue;
     }
@@ -174,11 +206,13 @@ async function seedOne(
       continue;
     }
     for (const song of songs) {
-      if (!song.playable || NOT_A_SONG.test(song.title)) continue;
+      if (!song.playable || isAlternateVersion(song.title)) continue;
       if (song.durationMs != null && song.durationMs < MIN_SONG_MS) continue;
       if (!sameArtist(artist.name, song.artist)) continue;
-      if (await save(prisma, song, reference, rankForListing(listing.get(normalizeTitle(song.title))))) added++;
-      known.add(normalizeTitle(song.title));
+      const title = normalizeTitle(song.title);
+      const saved = await save(prisma, song, artist, rankForListing(listing.get(title)), known.get(title));
+      if (saved.isNew) added++;
+      known.set(title, saved.trackId);
     }
     await markDone(album);
     if (read % 10 === 0 && read < todo.length) log(`  ${read} of ${todo.length} releases read, ${added} songs added`);
@@ -187,13 +221,28 @@ async function seedOne(
   return added;
 }
 
-/** Add one catalogue song, or fold it into the song already in the pool. Returns true if it is new. */
-async function save(prisma: PrismaClient, song: CatalogTrack, reference: string, rank: number): Promise<boolean> {
+/**
+ * Add one catalogue song, or fold it into the song already there: the same
+ * recording, the same song by key, or (sameTitleId) a song of this artist's
+ * with the same title.
+ */
+async function save(
+  prisma: PrismaClient,
+  song: CatalogTrack,
+  artist: ItunesArtist,
+  rank: number,
+  sameTitleId: string | undefined,
+): Promise<{ trackId: string; isNew: boolean }> {
+  const reference = artist.id;
   const key = songKey(song.title, song.artist);
-  const existing = await prisma.track.findFirst({
-    where: { OR: [{ itunesId: BigInt(song.id) }, { songKey: key, inPool: true }] },
-    orderBy: { rank: "desc" },
-  });
+  const existing =
+    (await prisma.track.findFirst({
+      // A song taken out of the pool earlier (or only in an imported profile) is reused, not duplicated.
+      where: { OR: [{ itunesId: BigInt(song.id) }, { songKey: key }] },
+      orderBy: [{ inPool: "desc" }, { rank: "desc" }],
+    })) ?? (sameTitleId ? await prisma.track.findUnique({ where: { id: sameTitleId } }) : null);
+  /** Credited to the artist alone, rather than as a duet or a guest version. */
+  const solo = (credit: string) => actKey(credit) === actKey(artist.name);
 
   let trackId: string;
   let isNew = false;
@@ -221,13 +270,16 @@ async function save(prisma: PrismaClient, song: CatalogTrack, reference: string,
     // In the database from someone's imported profile, but new to the pool.
     isNew = !existing.inPool;
     // Among several releases of a catalogue song, keep the plain original: an untouched
-    // title beats "(Live)" or "(Remix)", and the earliest release beats a re-recording.
+    // title beats "(Remastered)" or "(X's Version)", the artist alone beats a duet version,
+    // and the earliest release beats a later one.
     const better =
       existing.catalogOnly &&
       existing.itunesId !== BigInt(song.id) &&
       (isPlain(song.title) !== isPlain(existing.title)
         ? isPlain(song.title)
-        : (yearOf(song) ?? Infinity) < (existing.year ?? Infinity));
+        : solo(song.artist) !== solo(existing.artist)
+          ? solo(song.artist)
+          : (yearOf(song) ?? Infinity) < (existing.year ?? Infinity));
     const taken = better ? await prisma.track.findUnique({ where: { itunesId: BigInt(song.id) } }) : null;
     await prisma.track.update({
       where: { id: existing.id },
@@ -247,6 +299,7 @@ async function save(prisma: PrismaClient, song: CatalogTrack, reference: string,
               coverUrl: song.coverUrl,
               previewUrl: song.previewUrl,
               year: yearOf(song),
+              songKey: key,
             }
           : {}),
       },
@@ -257,5 +310,5 @@ async function save(prisma: PrismaClient, song: CatalogTrack, reference: string,
     create: { trackId, kind: "artist", reference },
     update: {},
   });
-  return isNew;
+  return { trackId, isNew };
 }

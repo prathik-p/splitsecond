@@ -124,12 +124,17 @@ profile run, songs with no rank are ordered by how often that listener played th
 
 **Artist catalogues.** For each name in `artists.txt` the seed finds the artist on Apple
 (the name must match exactly; an Apple Music artist link works too), lists every album,
-EP and single filed under them, and reads each one. A song is added once however many
-releases it has: the plain original wins over "(Live)", "(Remix)" or a re-recording, and
-karaoke tracks, voice memos, commentary and anything under a minute are left out. A single
+EP and single filed under them, and reads each one. Only the original studio recording
+of each song is added, once however many releases it has. Remixes, live recordings,
+acoustic and demo takes, sped-up or slowed edits, instrumentals, karaoke tracks, voice
+memos, commentary and anything under a minute are left out, and whole live albums, remix
+EPs and streaming-service sessions aren't even fetched (the rules are in
+`apps/api/src/charts/release-rules.ts`). A remaster, a radio edit or a re-recording
+counts as the same song, and the plain original is the one kept. A single
 of a song already read isn't fetched at all. The albums read are remembered per artist, so
 a stopped seed continues and a later seed only reads new releases; a big artist takes a
-few minutes the first time. These songs are marked `catalogOnly`: they come up only when
+few minutes the first time. When these rules change in a newer version, the next seed
+clears each artist's songs out and reads them again under the new rules. These songs are marked `catalogOnly`: they come up only when
 their artist is picked under Run options, so an "All artists" run stays on the hits. A
 song that is also a chart hit counts as a hit. Apple gives no popularity figure, so the
 order its search lists an artist's songs in stands in for it when a run goes easy to hard.

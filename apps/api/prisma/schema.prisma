@@ -66,6 +66,9 @@ model ArtistImport {
   query      String
   /// Albums already read, so a stopped seed continues and a later one only reads new releases.
   albumsDone String[] @default([])
+  /// Which version of the "what counts as a song" rules the albums were read with.
+  /// When the rules change, the artist is read again from scratch.
+  rules      Int      @default(1)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

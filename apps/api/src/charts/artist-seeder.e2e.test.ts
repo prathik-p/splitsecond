@@ -12,7 +12,7 @@ import { CatalogService } from "../catalog/catalog.service";
 import { GameService } from "../game/game.service";
 import { ItunesClient } from "../itunes/itunes-client";
 import { MockItunesSong, startMockApple } from "../../test/fixtures";
-import { artistIdFromLine, parseArtistsFile, seedArtists } from "./artist-seeder";
+import { RULES_VERSION, artistIdFromLine, parseArtistsFile, seedArtists } from "./artist-seeder";
 
 const ID = 950_000_000;
 const NOVA = 9501;
@@ -36,6 +36,7 @@ const RERECORDED: [number, string] = [ID + 902, "First Light (Nova's Version)"];
 const LIVE: [number, string] = [ID + 903, "Live in Town"];
 const SINGLE: [number, string] = [ID + 904, "Open Road - Single"];
 const NEW_SINGLE: [number, string] = [ID + 905, "Brand New - Single"];
+const REMIXES: [number, string] = [ID + 907, "Open Road (Remixes) - EP"];
 
 // In the order Apple's search would list them: best known first.
 const songs: MockItunesSong[] = [
@@ -45,19 +46,25 @@ const songs: MockItunesSong[] = [
   nova(3, "Vault Song", RERECORDED, 2021),
   nova(4, "Open Road (Karaoke Version)", RERECORDED, 2021),
   nova(5, "Voice Memo: Writing Open Road", RERECORDED, 2021),
+  nova(17, "Vault Song (Club Mix)", RERECORDED, 2021),
+  nova(18, "Vault Song (Acoustic)", RERECORDED, 2021),
   // The original album.
   nova(6, "Open Road", FIRST, 2010),
   nova(7, "Glass Hearts", FIRST, 2010),
   nova(8, "Interlude", FIRST, 2010, { durationMs: 31_000 }),
   nova(9, "Duet", FIRST, 2010, { artist: "Nova Lane & Echo Park" }),
   nova(10, "Guest Track", FIRST, 2010, { artist: "Someone Else" }),
-  // A live album: one song that exists nowhere else.
+  nova(19, "Vault Song", FIRST, 2010, { artist: "Nova Lane & Echo Park" }), // a duet version of a solo song
+  // A live album, including a song that exists nowhere else.
   nova(11, "Glass Hearts (Live)", LIVE, 2012),
   nova(12, "Only Ever Live (Live)", LIVE, 2012),
   nova(13, "No Preview Here", LIVE, 2012, { preview: false }),
   // Singles: one of an album track, one that is on no album.
   nova(14, "Open Road", SINGLE, 2010),
   nova(15, "Brand New", NEW_SINGLE, 2024),
+  // A remix EP.
+  nova(20, "Open Road (DJ Example Remix)", REMIXES, 2011),
+  nova(21, "Open Road (Extended Mix)", REMIXES, 2011),
 ];
 
 describe("the artists file", () => {
@@ -134,23 +141,24 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     await mock.close();
   });
 
-  it("adds every song once, preferring the plain original release", async () => {
+  it("adds every original song once, and no live, remix or other versions", async () => {
     const result = await seed(["Nova Lane"]);
-    expect(result).toEqual({ artists: 1, added: 5, notFound: [], stopped: false });
-    // Four releases read; the single of an album track and the compilation are not.
-    expect(mock.stats().albumLookups).toBe(4);
+    expect(result).toEqual({ artists: 1, added: 4, notFound: [], stopped: false });
+    // Three releases read. The live album, the remix EP, the single of an album track
+    // and the compilation the artist only appears on are not even fetched.
+    expect(mock.stats().albumLookups).toBe(3);
 
     const all = await catalogue();
     expect(all.map((t) => [t.title, t.id, t.year, t.deep])).toEqual([
       ["Brand New", 15, 2024, true],
       ["Duet", 9, 2010, true],
       ["Glass Hearts", 7, 2011, false], // the chart hit stays a hit, and keeps its year
-      ["Only Ever Live (Live)", 12, 2012, true], // no studio version exists
       ["Open Road", 6, 2010, true], // read first as "(Nova's Version)", then replaced by the original
-      ["Vault Song", 3, 2021, true],
+      ["Vault Song", 3, 2021, true], // the solo recording, not the later-read duet version
     ]);
-    // Karaoke, the voice memo, the interlude, someone else's track and the one without a preview are left out.
-    expect(await prisma.track.count({ where: mine })).toBe(6);
+    // The club mix, the acoustic take, karaoke, the voice memo, the interlude, someone
+    // else's track and everything live are left out, even a song that only exists live.
+    expect(await prisma.track.count({ where: mine })).toBe(5);
 
     // Apple's listing order stands in for popularity; the hit keeps its chart rank.
     const rank = Object.fromEntries(all.map((t) => [t.title, t.rank]));
@@ -165,11 +173,38 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     expect(await seed(["nova lane"])).toMatchObject({ artists: 1, added: 0 });
     expect(mock.stats().albumLookups).toBe(before.albumLookups);
     expect(mock.stats().searches).toBe(before.searches); // the artist isn't looked up by name again
-    expect(log.at(-1)).toBe("Nova Lane: up to date, 6 songs");
+    expect(log.at(-1)).toBe("Nova Lane: up to date, 5 songs");
 
     songs.push(nova(16, "Next Chapter", [ID + 906, "Next Chapter - Single"], 2026));
     expect(await seed(["Nova Lane"])).toMatchObject({ added: 1 });
     expect(mock.stats().albumLookups).toBe(before.albumLookups + 1);
+  });
+
+  it("reads an artist again when the rules have changed, clearing out what the old rules let in", async () => {
+    const before = await catalogue();
+    const rows = await prisma.track.count({ where: mine });
+    // As an older version left it: a live recording in the pool, and every album marked as read.
+    const stale = await prisma.track.create({
+      data: {
+        itunesId: BigInt(ID + 12),
+        title: "Only Ever Live (Live)",
+        artist: "Nova Lane",
+        rank: 10_000,
+        songKey: songKey("Only Ever Live (Live)", "Nova Lane"),
+        catalogOnly: true,
+        sources: { create: { kind: "artist", reference: String(NOVA) } },
+      },
+    });
+    await prisma.artistImport.update({ where: { itunesId: BigInt(NOVA) }, data: { rules: RULES_VERSION - 1 } });
+
+    await seed(["Nova Lane"]);
+    expect(log.some((m) => m.startsWith("Nova Lane: reading again"))).toBe(true);
+    expect((await prisma.track.findUniqueOrThrow({ where: { id: stale.id } })).inPool).toBe(false);
+    expect(await catalogue()).toEqual(before);
+    expect(await prisma.track.count({ where: mine })).toBe(rows + 1); // only the stale row is extra
+    expect(await prisma.artistImport.findUnique({ where: { itunesId: BigInt(NOVA) } })).toMatchObject({ rules: RULES_VERSION });
+    // The hit was never taken out of the pool.
+    expect(await prisma.track.findFirst({ where: { itunesId: BigInt(ID + 7) } })).toMatchObject({ inPool: true, catalogOnly: false });
   });
 
   it("takes an Apple Music link, and says so when a name isn't found", async () => {
@@ -190,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     const game = new GameService(prisma, new CatalogService(prisma));
     const options = await game.poolOptions();
     expect(options.artists).toContain("Nova Lane");
-    expect(options.songs.filter((s) => s.d)).toHaveLength(6);
+    expect(options.songs.filter((s) => s.d)).toHaveLength(5);
     expect(options.songs.filter((s) => !s.d)).toHaveLength(1);
 
     // With all artists, only the one hit counts, which isn't enough for a run.

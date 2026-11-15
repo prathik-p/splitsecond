@@ -1,0 +1,109 @@
+import { describe, expect, it } from "vitest";
+import { isAlternateRelease, isAlternateVersion } from "./release-rules";
+
+describe("isAlternateVersion", () => {
+  it.each([
+    "Blinding Lights",
+    "Love Story (Taylor's Version)",
+    "All Too Well (10 Minute Version) [Taylor's Version] [From the Vault]",
+    "Hey Jude (Remastered 2015)",
+    "Under Pressure - Remastered 2011",
+    "Starboy (feat. Daft Punk)",
+    "Bad Blood (feat. Kendrick Lamar)",
+    "Yellow (Radio Edit)",
+    "Vogue (Single Version)",
+    "Kiss (2020 Mix)",
+    "Rain (Original Mix)",
+    "WAP (feat. Megan Thee Stallion) [Explicit]",
+    "(I Can't Get No) Satisfaction",
+    "Live Forever",
+    "Live While We're Young",
+    "Piano Man",
+    "Demons",
+    "Remix to Ignition",
+    "The Mix-Up",
+    "Hello (feat. Piano Guys)",
+    "Stay (with Dub Collective)",
+    "Lover (First Dance Remaster)",
+    "Interlude: Shadow",
+    "Despacito (Version Pop)",
+    "Song 2 - 2012 Remaster",
+  ])("keeps the original recording: %s", (title) => {
+    expect(isAlternateVersion(title)).toBe(false);
+  });
+
+  it.each([
+    "Blinding Lights (Remix)",
+    "Blinding Lights (Chromatics Remix)",
+    "Save Your Tears (Remix) [feat. Ariana Grande]",
+    "Levitating (feat. DaBaby) [Don Diablo Remix]",
+    "Old Town Road Remix",
+    "Love Story (Live)",
+    "Love Story (Live from Clear Channel Stripped 2008)",
+    "Yellow - Live in Buenos Aires",
+    "Fix You (Live at Glastonbury)",
+    "drivers license (Acoustic)",
+    "Hello (Acoustic Version)",
+    "Wonderwall (Demo)",
+    "Flowers (Demo Version)",
+    "Bad Guy (Instrumental)",
+    "Halo (Karaoke Version)",
+    "Royals (A Cappella)",
+    "Escapism. (Sped Up)",
+    "Die For You (Slowed + Reverb)",
+    "Cruel Summer (Extended Mix)",
+    "One Kiss (Club Mix)",
+    "Titanium (Alesso Edit)",
+    "Easy On Me (Piano Version)",
+    "Yesterday (Take 2)",
+    "Help! (Alternate Version)",
+    "Creep (BBC Radio 1 Session)",
+    "Stay (Spotify Singles)",
+    "Voice Memo: Writing the Bridge",
+    "Fearless (Commentary)",
+    "Run the World (Girls) [Homecoming Live]",
+    "Shallow (Radio Edit) [Live]",
+  ])("leaves out another version: %s", (title) => {
+    expect(isAlternateVersion(title)).toBe(true);
+  });
+});
+
+describe("isAlternateRelease", () => {
+  it.each([
+    "After Hours",
+    "After Hours (Deluxe)",
+    "1989 (Taylor's Version) [Deluxe]",
+    "Blinding Lights - Single",
+    "My Dear Melancholy, - EP",
+    "The Highlights",
+    "Live Through This",
+    "Alive",
+    "The Lockdown Sessions",
+    "25 (Target Exclusive Edition)",
+    "Scorpion (Explicit)",
+    "Midnights (3am Edition)",
+  ])("reads a studio release: %s", (name) => {
+    expect(isAlternateRelease(name)).toBe(false);
+  });
+
+  it.each([
+    "Live at SoFi Stadium",
+    "Lover (Live from Paris)",
+    "Blinding Lights (Remixes) - EP",
+    "Blinding Lights (Remix) - Single",
+    "After Hours (Remixes)",
+    "Club Future Nostalgia (DJ Mix)",
+    "MTV Unplugged",
+    "Folklore: The Long Pond Studio Sessions (From the Disney+ Special) [Deluxe Edition]",
+    "Apple Music Live: Billie Eilish",
+    "iTunes Session - EP",
+    "Spotify Singles",
+    "Greatest Hits Karaoke",
+    "Starboy (Instrumentals)",
+    "One Night Only Live",
+    "drivers license (Acoustic) - Single",
+    "Fearless (Big Machine Radio Release Special)" + " [Commentary]",
+  ])("skips a release of other versions: %s", (name) => {
+    expect(isAlternateRelease(name)).toBe(true);
+  });
+});
