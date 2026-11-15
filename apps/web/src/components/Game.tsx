@@ -7,6 +7,7 @@ import {
   WRONG_GUESS_PENALTY,
   basePoints,
   formatSeconds,
+  nextStop,
   scoreRound,
   type PoolOptions,
   type PoolTrack,
@@ -329,16 +330,23 @@ function RoundView(props: {
     setProgress(null);
   }, []);
 
-  const play = useCallback(async () => {
+  /**
+   * Play the selected length, or stop if something is playing. With `target`,
+   * unlock and play that length straight away (the skip button).
+   */
+  const play = useCallback(async (target?: number) => {
     const p = player.current!;
-    if (progress !== null) return stop();
+    p.prime();
+    if (progress !== null && target === undefined) return stop();
     const mine = ++token.current;
+    cancelAnimationFrame(raf.current);
     onError(null);
     try {
       let current = round;
-      if (!over && selected > round.unlockedSeconds) {
+      const want = target ?? selected;
+      if (!over && want > round.unlockedSeconds) {
         setLoading(true);
-        current = await api.unlock(round.roundId, selected);
+        current = await api.unlock(round.roundId, want);
         setRound(current);
       }
       const need = over ? MAX_SECONDS : current.unlockedSeconds;
@@ -371,17 +379,39 @@ function RoundView(props: {
     }
   }, [onError, over, progress, round, selected, stop]);
 
+  /** Set when a round ends on screen, so the song plays once the answer shows. */
+  const replay = useRef(false);
+
   const finish = useCallback(
     (next: RoundState, run: RunState) => {
       stop();
       clip.current = null; // the full preview is available now
+      replay.current = true;
       setRound(next);
       onRunChange(run);
     },
     [onRunChange, stop],
   );
 
+  // The round just ended, named or not: play the song so the answer can be heard.
+  useEffect(() => {
+    if (!over || !replay.current) return;
+    replay.current = false;
+    void play();
+    // Only when the round ends; `play` changes on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [over]);
+
+  /** Jump to the next marked length and play it. */
+  const skipTo = nextStop(Math.max(round.unlockedSeconds, selected));
+  const skip = () => {
+    if (skipTo === null) return;
+    setSelected(skipTo);
+    void play(skipTo);
+  };
+
   const guess = async (track: PoolTrack) => {
+    player.current?.prime();
     onError(null);
     try {
       const res = await api.guess(round.roundId, track.id);
@@ -396,6 +426,7 @@ function RoundView(props: {
   };
 
   const giveUp = async () => {
+    player.current?.prime();
     onError(null);
     try {
       const res = await api.giveUp(round.roundId);
@@ -438,7 +469,7 @@ function RoundView(props: {
             <button
               type="button"
               className={`play${playing ? " is-playing" : ""}`}
-              onClick={play}
+              onClick={() => play()}
               disabled={loading}
               aria-label={playing ? "Stop" : `Play ${formatSeconds(selected)}`}
             >
@@ -451,13 +482,21 @@ function RoundView(props: {
               onSelect={setSelected}
             />
           </div>
-          <p className="deck-hint">
-            {extending
-              ? `Press play to unlock ${formatSeconds(selected)}. You can't go back down.`
-              : heard
-                ? "Drag right to hear more. Longer clips are worth less."
-                : "Press play to hear the first tenth of a second."}
-          </p>
+          <div className="deck-foot">
+            <p className="deck-hint">
+              {extending
+                ? `Press play to unlock ${formatSeconds(selected)}. You can't go back down.`
+                : heard
+                  ? "Skip or drag right to hear more. Longer clips are worth less."
+                  : "Press play to hear the first tenth of a second."}
+            </p>
+            {skipTo !== null && (
+              <button type="button" className="btn skip" onClick={skip} disabled={loading} data-testid="skip">
+                Skip to {formatSeconds(skipTo)}
+                <span className="skip-worth">worth {fmt(scoreRound(skipTo, round.wrongGuesses))}</span>
+              </button>
+            )}
+          </div>
 
           <GuessInput pool={pool} excluded={excluded} onGuess={guess} />
 
@@ -505,8 +544,8 @@ function RoundView(props: {
               )}
             </p>
             <div className="reveal-actions">
-              <button type="button" className="btn" onClick={play} disabled={loading}>
-                {playing ? "Stop" : loading ? "Loading…" : "Hear the preview"}
+              <button type="button" className="btn" onClick={() => play()} disabled={loading} data-testid="replay">
+                {playing ? "Stop" : loading ? "Loading…" : "Play it again"}
               </button>
               <button
                 type="button"

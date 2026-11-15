@@ -91,6 +91,7 @@ export async function seedAppleChart(
           where: { id: existing.id },
           data: {
             inPool: true,
+            catalogOnly: false,
             year: existing.year ?? released,
             rank: Math.max(existing.rank, rank),
             genre: existing.genre ?? t.genre ?? null,

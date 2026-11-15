@@ -11,6 +11,7 @@
  *     song matched to Apple's iTunes catalog for its preview
  *   - Apple's current chart, which covers the year in progress
  *   - each song's genre, for the lobby's run options (filled in for older songs too)
+ *   - every song by the artists listed in artists.txt (at the top of the project)
  *   Apple allows about 20 lookups a minute, so a full seed takes around an hour.
  *   It works down the charts across all years at once: stop it whenever you
  *   like and the pool is already playable; run it again to continue.
@@ -31,6 +32,7 @@ import { songKey } from "@splitsecond/shared";
 import { activeProvider } from "../src/catalog/catalog.service";
 import { seedHits } from "../src/catalog/hits-seeder";
 import { seedAppleChart } from "../src/charts/apple-chart";
+import { parseArtistsFile, seedArtists } from "../src/charts/artist-seeder";
 import { seedBillboard } from "../src/charts/billboard-seeder";
 import { fillGenres } from "../src/charts/genres";
 import { WikipediaCharts } from "../src/charts/wikipedia-charts";
@@ -80,6 +82,8 @@ async function seedFromItunes() {
     console.log(`  Skipped: ${(err as Error).message}`);
   }
 
+  await seedArtistCatalogues(itunes);
+
   if (perYear <= 0) return;
   console.log(`Adding the Billboard year-end top ${perYear} of ${fromYear} to ${toYear}.`);
   console.log("Apple allows about 20 lookups a minute, so this is slow. You can stop it and re-run to continue.");
@@ -99,6 +103,19 @@ async function seedFromItunes() {
   }
   if (result.unread.length) {
     console.log(`Couldn't read the chart for: ${result.unread.join(", ")}. Run the seed again in a few minutes to add them.`);
+  }
+}
+
+/** artists.txt at the top of the project: artists whose every song should be in the pool. */
+async function seedArtistCatalogues(itunes: ItunesClient) {
+  const file = process.env.ARTISTS_FILE || join(__dirname, "../../../artists.txt");
+  const lines = existsSync(file) ? parseArtistsFile(readFileSync(file, "utf8")) : [];
+  if (lines.length === 0) return;
+  console.log(`Adding the whole catalogue of ${lines.length} ${lines.length === 1 ? "artist" : "artists"} from artists.txt…`);
+  const result = await seedArtists(prisma, itunes, lines, { log: indent });
+  console.log(`  ${result.added} songs added.`);
+  if (result.stopped) {
+    console.log("  Stopped early: Apple is still refusing lookups. Run the seed again in half an hour or so to continue.");
   }
 }
 

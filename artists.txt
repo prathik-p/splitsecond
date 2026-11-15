@@ -1,0 +1,16 @@
+# Artists whose whole catalogue should be in the game, one per line.
+#
+# Add a name, save, and run `pnpm db:seed`. The seed reads every album, EP and
+# single Apple has for each artist and adds the songs. It remembers what it has
+# read, so later seeds only pick up new releases.
+#
+# These songs come up when you pick the artist under Run options. With
+# "All artists" a run still draws from the hits only.
+#
+# Write the name as Apple Music spells it. If two artists share a name, or the
+# seed says it can't find one, paste the artist's Apple Music link instead:
+#   https://music.apple.com/us/artist/some-artist/123456789
+#
+# Lines starting with # are ignored. Examples (remove the # to use one):
+# Taylor Swift
+# The Weeknd

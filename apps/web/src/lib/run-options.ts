@@ -11,13 +11,22 @@ export const fold = (s: string) =>
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 
-/** The songs that fit the options. An empty list of genres or artists means any. */
+/**
+ * The songs a run with these options draws from. No genres means any genre.
+ * No artists means every artist's hits: deep cuts need their artist to be picked.
+ */
 export function matchingSongs(options: PoolOptions, filters: RunFilters): PoolOptions["songs"] {
   const genres = new Set(filters.genres.map((g) => options.genres.indexOf(g)));
   const artists = new Set(filters.artists.map((a) => options.artists.indexOf(a)));
   return options.songs.filter(
-    (s) => (genres.size === 0 || genres.has(s.g)) && (artists.size === 0 || s.a.some((a) => artists.has(a))),
+    (s) => (genres.size === 0 || genres.has(s.g)) && (artists.size === 0 ? !s.d : s.a.some((a) => artists.has(a))),
   );
+}
+
+/** Every song in the chosen genres, deep cuts included: what picking an artist can bring in. */
+export function songsInGenres(options: PoolOptions, genreNames: string[]): PoolOptions["songs"] {
+  const genres = new Set(genreNames.map((g) => options.genres.indexOf(g)));
+  return options.songs.filter((s) => genres.size === 0 || genres.has(s.g));
 }
 
 const part = (names: string[], all: string, many: string) =>

@@ -129,13 +129,22 @@ createServer(mockLastfmHandler(users)).listen(LASTFM_PORT, "127.0.0.1", () =>
 
 // The same made-up songs on a mock iTunes, with a year-end chart per hit year.
 const genres = ["Pop", "Alternative", "Pop", "Hip-Hop/Rap"];
-const itunesSongs: MockItunesSong[] = tracks.map((t, i) => ({
-  id: 800_000 + i,
-  title: t.title,
-  artist: t.artist,
-  releaseDate: `${t.releaseDate ?? "2015-01-01"}T08:00:00Z`,
-  genre: genres[i % genres.length],
-}));
+// Every act can be put in artists.txt: its songs sit on one album each.
+const acts = [...new Set(tracks.map((t) => t.artist))].map((name, i) => ({ id: 600_000 + i, name }));
+const itunesSongs: MockItunesSong[] = tracks.map((t, i) => {
+  const act = acts.find((a) => a.name === t.artist)!;
+  return {
+    id: 800_000 + i,
+    title: t.title,
+    artist: t.artist,
+    releaseDate: `${t.releaseDate ?? "2015-01-01"}T08:00:00Z`,
+    genre: genres[i % genres.length],
+    artistId: act.id,
+    albumId: act.id + 50_000,
+    albumName: `The ${t.artist.replace(/^The /, "")} Album`,
+    durationMs: 210_000,
+  };
+});
 const charts = Object.fromEntries(
   hitYears.map((year) => [
     year,
@@ -150,6 +159,7 @@ void startMockApple(itunesSongs, m4a, {
   charts,
   mostPlayed: [800_000 + 14, 800_000 + 6],
   topSongs: [800_000 + 14, 800_000 + 6],
+  artists: acts,
   port: APPLE_PORT,
   delayMs: delay,
 }).then(() => console.log(`Mock iTunes, Apple chart and Wikipedia on http://127.0.0.1:${APPLE_PORT}`));

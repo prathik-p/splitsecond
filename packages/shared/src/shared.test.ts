@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  LENGTH_STOPS,
   basePoints,
+  nextStop,
   normalizeTitle,
   positionToSeconds,
   scoreRound,
@@ -48,6 +50,21 @@ describe("log scrubber", () => {
     expect(snapSeconds(12.4)).toBe(12);
     expect(snapSeconds(99)).toBe(30);
     expect(snapSeconds(0.01)).toBe(0.1);
+  });
+});
+
+describe("skip steps", () => {
+  it("steps through the marked lengths and stops at the full clip", () => {
+    const steps: number[] = [];
+    for (let s: number | null = 0.1; s !== null; s = nextStop(s)) steps.push(s);
+    expect(steps).toEqual([...LENGTH_STOPS]);
+    expect(nextStop(30)).toBeNull();
+  });
+
+  it("goes to the next mark from a length in between", () => {
+    expect(nextStop(0.3)).toBe(0.5);
+    expect(nextStop(2.75)).toBe(4);
+    expect(nextStop(15)).toBe(30);
   });
 });
 

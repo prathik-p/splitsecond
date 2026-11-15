@@ -26,6 +26,14 @@ export function snapSeconds(seconds: number): number {
   return clampSeconds(Number(snapped.toFixed(2)));
 }
 
+/** The marked lengths on the scrubber, and the steps the skip button takes. */
+export const LENGTH_STOPS = [0.1, 0.5, 1, 2, 4, 8, 15, 30] as const;
+
+/** The next marked length after `seconds`, or null at the full clip. */
+export function nextStop(seconds: number): number | null {
+  return LENGTH_STOPS.find((s) => s > seconds + 1e-9) ?? null;
+}
+
 export function formatSeconds(seconds: number): string {
   if (seconds < 1) return `${seconds.toFixed(1)}s`;
   if (seconds < 10 && !Number.isInteger(seconds)) return `${Number(seconds.toFixed(2))}s`;

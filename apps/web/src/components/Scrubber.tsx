@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react";
 import {
+  LENGTH_STOPS,
   MAX_SECONDS,
   MIN_SECONDS,
   basePoints,
@@ -10,8 +11,6 @@ import {
   secondsToPosition,
   snapSeconds,
 } from "@splitsecond/shared";
-
-const STOPS = [0.1, 0.5, 1, 2, 4, 8, 15, 30];
 
 interface Props {
   /** Length already heard. The handle can't go below it. */
@@ -105,7 +104,7 @@ export function Scrubber({ unlocked, selected, progress, disabled, onSelect }: P
         />
       </div>
       <div className="scrubber-stops">
-        {STOPS.map((s) => (
+        {LENGTH_STOPS.map((s) => (
           <button
             key={s}
             type="button"

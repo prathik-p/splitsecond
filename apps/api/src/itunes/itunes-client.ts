@@ -20,6 +20,27 @@ interface ItunesSong {
   previewUrl?: string;
   releaseDate?: string;
   primaryGenreName?: string;
+  trackTimeMillis?: number;
+  // Artists and albums come back in the same list as songs.
+  artistId?: number;
+  artistType?: string;
+  collectionId?: number;
+  collectionType?: string;
+  trackCount?: number;
+}
+
+export interface ItunesArtist {
+  id: string;
+  name: string;
+}
+
+export interface ItunesAlbum {
+  id: string;
+  name: string;
+  /** The artist the album is filed under. */
+  artistId: string | null;
+  trackCount: number;
+  releaseDate: string | null;
 }
 
 interface ItunesResponse {
@@ -100,6 +121,65 @@ export class ItunesClient implements Catalog {
     return res.results.map(toTrack).filter((t): t is CatalogTrack => t !== null);
   }
 
+  /** Artists whose name matches, most relevant first. */
+  async findArtists(name: string, limit = 10): Promise<ItunesArtist[]> {
+    const params = new URLSearchParams({
+      term: name,
+      media: "music",
+      entity: "musicArtist",
+      attribute: "artistTerm",
+      country: this.country,
+      limit: String(limit),
+    });
+    const res = await this.get(`/search?${params}`);
+    return res.results.map(toArtist).filter((a): a is ItunesArtist => a !== null);
+  }
+
+  async artist(id: string): Promise<ItunesArtist | null> {
+    const res = await this.get(`/lookup?${new URLSearchParams({ id, country: this.country })}`);
+    return res.results.map(toArtist).find((a) => a !== null) ?? null;
+  }
+
+  /** Every album, EP and single filed under an artist (Apple returns at most 200). */
+  async artistAlbums(artistId: string): Promise<ItunesAlbum[]> {
+    const params = new URLSearchParams({ id: artistId, entity: "album", limit: "200", country: this.country });
+    const res = await this.get(`/lookup?${params}`);
+    return res.results.flatMap((r) =>
+      r.wrapperType === "collection" && r.collectionId && r.collectionName
+        ? [
+            {
+              id: String(r.collectionId),
+              name: r.collectionName,
+              artistId: r.artistId ? String(r.artistId) : null,
+              trackCount: r.trackCount ?? 0,
+              releaseDate: r.releaseDate ?? null,
+            },
+          ]
+        : [],
+    );
+  }
+
+  /** The songs on one album. */
+  async albumSongs(albumId: string): Promise<CatalogTrack[]> {
+    const params = new URLSearchParams({ id: albumId, entity: "song", limit: "200", country: this.country });
+    const res = await this.get(`/lookup?${params}`);
+    return res.results.map(toTrack).filter((t): t is CatalogTrack => t !== null);
+  }
+
+  /** An artist's songs as Apple's search ranks them, best known first (at most 200). */
+  async artistSongs(name: string): Promise<CatalogTrack[]> {
+    const params = new URLSearchParams({
+      term: name,
+      media: "music",
+      entity: "song",
+      attribute: "artistTerm",
+      country: this.country,
+      limit: "200",
+    });
+    const res = await this.get(`/search?${params}`);
+    return res.results.map(toTrack).filter((t): t is CatalogTrack => t !== null);
+  }
+
   async track(id: string): Promise<CatalogTrack | null> {
     const [track] = await this.tracks([id]);
     return track ?? null;
@@ -167,6 +247,11 @@ export class ItunesClient implements Catalog {
   }
 }
 
+function toArtist(row: ItunesSong): ItunesArtist | null {
+  if (row.wrapperType !== "artist" || !row.artistId || !row.artistName) return null;
+  return { id: String(row.artistId), name: row.artistName };
+}
+
 function toTrack(song: ItunesSong): CatalogTrack | null {
   if (song.wrapperType !== "track" || (song.kind && song.kind !== "song")) return null;
   if (!song.trackId || !song.trackName || !song.artistName) return null;
@@ -181,6 +266,7 @@ function toTrack(song: ItunesSong): CatalogTrack | null {
     rank: 0,
     isrc: null,
     genre: song.primaryGenreName?.trim() || null,
+    durationMs: song.trackTimeMillis ?? null,
     releaseDate: song.releaseDate ?? null,
     previewUrl: song.previewUrl ?? null,
     playable: !!song.previewUrl,

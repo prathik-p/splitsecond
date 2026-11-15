@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { RUN_LENGTH, type PoolOptions, type RunFilters } from "@splitsecond/shared";
-import { describeFilters, fold, matchingSongs } from "@/lib/run-options";
+import { describeFilters, fold, matchingSongs, songsInGenres } from "@/lib/run-options";
 
 interface Props {
   options: PoolOptions;
@@ -24,14 +24,16 @@ export function RunOptions({ options, value, onChange }: Props) {
 
   const genreCounts = useMemo(() => {
     const counts = options.genres.map(() => 0);
-    for (const s of options.songs) if (s.g >= 0) counts[s.g]++;
+    // Hits only: a genre on its own doesn't bring in deep cuts.
+    for (const s of options.songs) if (s.g >= 0 && !s.d) counts[s.g]++;
     return counts;
   }, [options]);
 
   // Artists are counted within the chosen genres, so the list shows who can actually come up.
+  // Picking an artist brings in their whole catalogue, so deep cuts count here.
   const artists = useMemo(() => {
     const counts = new Map<number, number>();
-    for (const s of matchingSongs(options, { genres: value.genres, artists: [] })) {
+    for (const s of songsInGenres(options, value.genres)) {
       for (const a of s.a) counts.set(a, (counts.get(a) ?? 0) + 1);
     }
     return [...counts]

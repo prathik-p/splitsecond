@@ -68,7 +68,7 @@ export class GameService {
   async poolOptions(): Promise<PoolOptions> {
     const tracks = await this.prisma.track.findMany({
       where: { inPool: true },
-      select: { title: true, artist: true, genre: true, songKey: true },
+      select: { title: true, artist: true, genre: true, songKey: true, catalogOnly: true },
       orderBy: [{ rank: "desc" }, { id: "asc" }],
     });
     return buildOptions(tracks).options;
@@ -113,6 +113,7 @@ export class GameService {
         artist: true,
         genre: true,
         songKey: true,
+        catalogOnly: true,
         rank: true,
         profiles: profile ? { where: { profileId: profile.id }, select: { playcount: true } } : false,
       },
@@ -124,7 +125,8 @@ export class GameService {
       const plays = (t: (typeof pool)[number]) => t.profiles?.[0]?.playcount ?? 0;
       pool.sort((a, b) => b.rank - a.rank || plays(b) - plays(a));
     }
-    if (filtered) {
+    if (!profile) {
+      // Also keeps deep cuts out unless their artist was picked.
       const keys = matchingKeys(buildOptions(pool), filters);
       pool = pool.filter((t) => keys.has(t.songKey));
     }

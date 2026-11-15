@@ -16,6 +16,8 @@ export interface OptionTrack {
   artist: string;
   genre: string | null;
   songKey: string;
+  /** In the pool only as part of an artist's whole catalogue, not as a hit. */
+  catalogOnly?: boolean;
 }
 
 /** Shorter names for Apple's genres where the full one is a mouthful on a chip. */
@@ -85,7 +87,11 @@ export function buildOptions(tracks: OptionTrack[]): PoolIndex {
       for (const guest of match[1].split(JOINERS).map(artistKey)) if (acts.has(guest)) credited.add(guest);
     }
     const g = named(t.genre);
-    out.push({ g: g === null ? -1 : (genreAt.get(g) ?? genreAt.get(OTHER_GENRE)!), a: [...credited].map(indexOf) });
+    out.push({
+      g: g === null ? -1 : (genreAt.get(g) ?? genreAt.get(OTHER_GENRE)!),
+      a: [...credited].map(indexOf),
+      ...(t.catalogOnly ? { d: 1 as const } : {}),
+    });
     keys.push(t.songKey);
   }
   return { options: { genres, artists, songs: out }, keys };
@@ -100,7 +106,10 @@ export function cleanFilters(genres: unknown, artists: unknown): RunFilters {
   return { genres: list(genres), artists: list(artists) };
 }
 
-/** The songKeys of the songs that fit the options. No genres means any genre; no artists, any artist. */
+/**
+ * The songKeys of the songs that fit the options. No genres means any genre.
+ * No artists means any artist's hits: deep cuts need their artist to be picked.
+ */
 export function matchingKeys(index: PoolIndex, filters: RunFilters): Set<string> {
   const { options, keys } = index;
   const genres = new Set(filters.genres.map((g) => options.genres.indexOf(g)));
@@ -109,7 +118,7 @@ export function matchingKeys(index: PoolIndex, filters: RunFilters): Set<string>
   const out = new Set<string>();
   options.songs.forEach((song, i) => {
     if (filters.genres.length && !genres.has(song.g)) return;
-    if (filters.artists.length && !song.a.some((a) => artists.has(a))) return;
+    if (filters.artists.length ? !song.a.some((a) => artists.has(a)) : song.d) return;
     out.add(keys[i]);
   });
   return out;

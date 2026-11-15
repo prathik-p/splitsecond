@@ -18,6 +18,8 @@ export interface CatalogTrack {
   /** Popularity, higher is better known. 0 if the provider doesn't say. */
   rank: number;
   isrc: string | null;
+  /** Length of the whole song in milliseconds, where the provider says. */
+  durationMs?: number | null;
   /** The provider's genre name, where it gives one (iTunes does). */
   genre?: string | null;
   /** "YYYY-MM-DD" (possibly longer), or null. */

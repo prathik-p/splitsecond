@@ -20,6 +20,9 @@ pnpm db:seed          # fill the pool with hits (slow: see below)
 pnpm dev              # web on http://localhost:3000, API on http://localhost:4000
 ```
 
+To add every song by particular artists, list them in `artists.txt` at the top of the
+project (one name per line) and run `pnpm db:seed`. See "Artist catalogues" below.
+
 After pulling a newer version, run `pnpm db:migrate` again (it applies any new tables or
 columns) and `pnpm db:seed` (it fills in anything new, such as genres, for songs already saved).
 
@@ -49,6 +52,7 @@ Seed and provider settings (environment or `apps/api/.env`):
 | `HITS_PER_YEAR` | 50 | How far down each year's chart to go; 0 skips the yearly hits |
 | `ITUNES_COUNTRY` | `US` | iTunes storefront to search |
 | `ITUNES_PER_MINUTE` | 19 | iTunes calls per minute |
+| `ARTISTS_FILE` | `artists.txt` at the top of the project | Artists whose whole catalogue is added |
 | `WIKIPEDIA_USER_AGENT` | a generic name | Optional. Wikipedia limits clients less when they name a contact, e.g. `my-app/1.0 (me@example.com)` |
 | `SEED_PLAYLISTS` | empty | Deezer only: extra playlist ids to add as they are |
 
@@ -117,6 +121,24 @@ ignored), so picking another release of the right song counts.
 **Difficulty.** The pool is sorted by `rank` (chart position, or Deezer's popularity) and
 split into five bands; a run takes one random song from each, best known first. In a
 profile run, songs with no rank are ordered by how often that listener played them.
+
+**Artist catalogues.** For each name in `artists.txt` the seed finds the artist on Apple
+(the name must match exactly; an Apple Music artist link works too), lists every album,
+EP and single filed under them, and reads each one. A song is added once however many
+releases it has: the plain original wins over "(Live)", "(Remix)" or a re-recording, and
+karaoke tracks, voice memos, commentary and anything under a minute are left out. A single
+of a song already read isn't fetched at all. The albums read are remembered per artist, so
+a stopped seed continues and a later seed only reads new releases; a big artist takes a
+few minutes the first time. These songs are marked `catalogOnly`: they come up only when
+their artist is picked under Run options, so an "All artists" run stays on the hits. A
+song that is also a chart hit counts as a hit. Apple gives no popularity figure, so the
+order its search lists an artist's songs in stands in for it when a run goes easy to hard.
+Removing a name from the file doesn't remove the songs already added.
+
+**Skipping and the replay.** "Skip to …" unlocks the next marked length (0.5s, 1s, 2s, 4s,
+8s, 15s, 30s) and plays it; dragging the scrubber still works for lengths in between. When
+a round ends, by a correct guess or by giving up, the song's preview plays by itself (the
+same 30 seconds the clips were cut from) until you stop it or move on.
 
 **Last.fm profiles (server only).** The lobby no longer offers this, but the API still has
 it, for a later "several profiles in one game" mode. It needs `LASTFM_API_KEY` in

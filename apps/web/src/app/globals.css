@@ -452,11 +452,35 @@ button:disabled {
   }
 }
 
-.deck-hint {
-  min-height: 1.5rem;
+.deck-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+  min-height: 2.6rem;
   margin: 0.6rem 0 1.5rem;
+}
+
+.deck-hint {
+  flex: 1 1 14rem;
+  margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.skip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+}
+
+.skip-worth {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- scrubber ---------- */

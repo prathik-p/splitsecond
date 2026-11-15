@@ -165,7 +165,12 @@ export async function seedBillboard(
     // A song on two years' charts keeps its first year and its best position.
     await prisma.track.update({
       where: { id: track.id },
-      data: { inPool: true, year: Math.min(track.year ?? year, year), rank: Math.max(track.rank, rank) },
+      data: {
+        inPool: true,
+        catalogOnly: false, // a chart entry makes it a hit, however it first got here
+        year: Math.min(track.year ?? year, year),
+        rank: Math.max(track.rank, rank),
+      },
     });
     await prisma.trackSource.create({ data: { trackId: track.id, kind: "billboard", reference } });
     byYear[year]++;

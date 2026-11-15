@@ -19,18 +19,34 @@ export interface LoadedClip {
   seconds: number;
 }
 
+/** One audio context for the whole page: once a click has unlocked it, it stays unlocked. */
+let shared: AudioContext | null = null;
+
 export class SnippetPlayer {
-  private ctx: AudioContext | null = null;
   private current: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
 
   /** Must first be called from a user gesture (browsers block audio otherwise). */
   private context(): AudioContext {
-    if (!this.ctx) {
+    if (!shared) {
       const Ctor =
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new Ctor();
+      shared = new Ctor();
     }
-    return this.ctx;
+    return shared;
+  }
+
+  /**
+   * Call at the start of a click handler. Browsers only let audio start from a
+   * user gesture, and the replay after a round begins after a network call,
+   * by which time the gesture is over.
+   */
+  prime() {
+    try {
+      const ctx = this.context();
+      if (ctx.state === "suspended") void ctx.resume();
+    } catch {
+      // no Web Audio here; play() will report it
+    }
   }
 
   async decode(data: ArrayBuffer): Promise<LoadedClip> {
@@ -79,9 +95,9 @@ export class SnippetPlayer {
 
   stop() {
     const playing = this.current;
-    if (!playing || !this.ctx) return;
+    if (!playing || !shared) return;
     this.current = null;
-    const now = this.ctx.currentTime;
+    const now = shared.currentTime;
     try {
       playing.gain.gain.cancelScheduledValues(now);
       playing.gain.gain.setValueAtTime(playing.gain.gain.value, now);

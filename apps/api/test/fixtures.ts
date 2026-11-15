@@ -210,6 +210,12 @@ export interface MockItunesSong {
   preview?: boolean;
   /** Apple's primaryGenreName. */
   genre?: string;
+  /** The album it is on and the artist it is filed under, for catalogue lookups. */
+  albumId?: number;
+  albumName?: string;
+  artistId?: number;
+  /** Whole song length. */
+  durationMs?: number;
 }
 
 /** Wikipedia-style year-end page: one wikitable of position / title / artist. */
@@ -237,6 +243,10 @@ export async function startMockApple(
   options: {
     charts?: Record<number, { position: number; title: string; artist: string }[]>;
     mostPlayed?: number[];
+    /** Artists that can be searched for and looked up; their albums come from the songs' albumId. */
+    artists?: { id: number; name: string }[];
+    /** Albums listed for an artist but filed under someone else (appearances). */
+    appearsOn?: Record<number, { id: number; name: string; artistId: number }[]>;
     /** Ids on the older "top songs" feed (/topsongs.json). */
     topSongs?: number[];
     /** Fixed port, for the standalone mock. Defaults to any free port. */
@@ -245,7 +255,7 @@ export async function startMockApple(
     delayMs?: number;
   } = {},
 ) {
-  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0, hung: 0, wikipedia: 0, chart: 0, topSongs: 0 };
+  const stats = { searches: 0, lookups: 0, previewDownloads: 0, rateLimited: 0, hung: 0, albumLookups: 0, wikipedia: 0, chart: 0, topSongs: 0 };
   const wikipediaAt: number[] = [];
   /** Set > 0 to answer that many search calls with 403, like Apple's rate limiter. */
   const control = {
@@ -281,7 +291,29 @@ export async function startMockApple(
       previewUrl: s.preview === false ? undefined : `${base}${control.previewPath}/${s.id}.m4a`,
       releaseDate: s.releaseDate,
       primaryGenreName: s.genre,
+      artistId: s.artistId,
+      collectionId: s.albumId,
+      trackTimeMillis: s.durationMs,
+      ...(s.albumName ? { collectionName: s.albumName } : {}),
     });
+    const artistRow = (a: { id: number; name: string }) => ({
+      wrapperType: "artist",
+      artistType: "Artist",
+      artistName: a.name,
+      artistId: a.id,
+    });
+    const albumRow = (id: number) => {
+      const on = songs.filter((s) => s.albumId === id);
+      return {
+        wrapperType: "collection",
+        collectionType: "Album",
+        collectionId: id,
+        collectionName: on[0]?.albumName ?? `Album ${id}`,
+        artistId: on[0]?.artistId,
+        trackCount: on.length,
+        releaseDate: on[0]?.releaseDate,
+      };
+    };
 
     if (url.pathname === "/search") {
       if (control.hangNext > 0) {
@@ -297,6 +329,16 @@ export async function startMockApple(
         return res.end();
       }
       stats.searches++;
+      const term = (url.searchParams.get("term") ?? "").toLowerCase();
+      if (url.searchParams.get("entity") === "musicArtist") {
+        const found = (options.artists ?? []).filter((a) => a.name.toLowerCase().includes(term));
+        return json({ resultCount: found.length, results: found.map(artistRow) });
+      }
+      if (url.searchParams.get("attribute") === "artistTerm") {
+        // An artist's songs, in the order the list has them (Apple's is roughly by popularity).
+        const found = songs.filter((s) => s.artist.toLowerCase().includes(term));
+        return json({ resultCount: found.length, results: found.map(song) });
+      }
       const words = (url.searchParams.get("term") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
       // Like Apple, match loosely: every word of the title, and any word of the artist.
       const hits = songs.filter((s) => {
@@ -306,8 +348,33 @@ export async function startMockApple(
       return json({ resultCount: hits.length, results: hits.map(song) });
     }
     if (url.pathname === "/lookup") {
-      stats.lookups++;
       const ids = (url.searchParams.get("id") ?? "").split(",").map(Number);
+      const artist = (options.artists ?? []).find((a) => a.id === ids[0]);
+      if (artist) {
+        // An artist, and with entity=album everything filed under them plus their appearances.
+        const own = [...new Set(songs.filter((s) => s.artistId === artist.id && s.albumId).map((s) => s.albumId!))];
+        const albums =
+          url.searchParams.get("entity") === "album"
+            ? [
+                ...own.map(albumRow),
+                ...(options.appearsOn?.[artist.id] ?? []).map((a) => ({
+                  wrapperType: "collection",
+                  collectionType: "Album",
+                  collectionId: a.id,
+                  collectionName: a.name,
+                  artistId: a.artistId,
+                  trackCount: 12,
+                })),
+              ]
+            : [];
+        return json({ resultCount: 1 + albums.length, results: [artistRow(artist), ...albums] });
+      }
+      if (songs.some((s) => s.albumId === ids[0])) {
+        stats.albumLookups++;
+        const on = songs.filter((s) => s.albumId === ids[0]);
+        return json({ resultCount: 1 + on.length, results: [albumRow(ids[0]), ...on.map(song)] });
+      }
+      stats.lookups++;
       const hits = ids.map((id) => songs.find((s) => s.id === id)).filter((s): s is MockItunesSong => !!s);
       return json({ resultCount: hits.length, results: hits.map(song) });
     }

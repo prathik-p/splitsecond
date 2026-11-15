@@ -22,8 +22,12 @@ export interface PoolOptions {
   /** Genre names, biggest first. */
   genres: string[];
   artists: string[];
-  /** One entry per song: g is its genre's index (-1 if unknown), a its artists' indexes. */
-  songs: { g: number; a: number[] }[];
+  /**
+   * One entry per song: g is its genre's index (-1 if unknown), a its artists' indexes.
+   * d marks a deep cut: a song that is here because its artist's whole catalogue was
+   * added, and that comes up only when one of its artists is picked.
+   */
+  songs: { g: number; a: number[]; d?: 1 }[];
 }
 
 /** The genres and artists a run is limited to. An empty list means any. */

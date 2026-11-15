@@ -30,6 +30,9 @@ model Track {
   /// Normalised "title::artist", used to treat re-releases as the same song.
   songKey    String
   inPool     Boolean  @default(true)
+  /// In the pool only because its artist's whole catalogue was added (artists.txt),
+  /// not because it was a hit. These come up only when that artist is picked.
+  catalogOnly Boolean @default(false)
   createdAt  DateTime @default(now())
 
   rounds   Round[]
@@ -52,6 +55,21 @@ model TrackSource {
   track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@unique([trackId, kind, reference])
+}
+
+/// An artist from artists.txt whose whole catalogue is added to the pool.
+model ArtistImport {
+  /// Apple's id for the artist.
+  itunesId   BigInt   @id
+  name       String
+  /// The line in artists.txt this came from, lower-cased, so the seed doesn't look it up again.
+  query      String
+  /// Albums already read, so a stopped seed continues and a later one only reads new releases.
+  albumsDone String[] @default([])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([query])
 }
 
 model Run {
