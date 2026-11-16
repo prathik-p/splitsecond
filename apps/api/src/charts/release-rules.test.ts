@@ -28,6 +28,12 @@ describe("isAlternateVersion", () => {
     "Interlude: Shadow",
     "Despacito (Version Pop)",
     "Song 2 - 2012 Remaster",
+    "Long Live",
+    "Live and Let Die",
+    "Live at Five",
+    "Let Me Live",
+    "Tourist",
+    "Detour (Interlude)",
   ])("keeps the original recording: %s", (title) => {
     expect(isAlternateVersion(title)).toBe(false);
   });
@@ -63,6 +69,26 @@ describe("isAlternateVersion", () => {
     "Fearless (Commentary)",
     "Run the World (Girls) [Homecoming Live]",
     "Shallow (Radio Edit) [Live]",
+    "Golden Hour (Livestream)",
+    "Golden Hour - Livestream",
+    "Golden Hour (Livestream Version)",
+    "Golden Hour (2021 Livestream)",
+    "Golden Hour (Global Live Stream)",
+    "Golden Hour [Live-Stream]",
+    "Golden Hour Livestream",
+    "Golden Hour Live at Wembley",
+    "Golden Hour Live from the Royal Albert Hall",
+    "Golden Hour (Live",
+    "Golden Hour（Live）",
+    "Golden Hour【Live】",
+    "Golden Hour (The Eras Tour)",
+    "Golden Hour (World Tour Version)",
+    "Golden Hour (Soundcheck)",
+    "Golden Hour (En Vivo)",
+    "Golden Hour (Ao Vivo)",
+    "Golden Hour (Tiny Desk)",
+    "Golden Hour (Lofi)",
+    "Golden Hour (Lo-Fi Flip)",
   ])("leaves out another version: %s", (title) => {
     expect(isAlternateVersion(title)).toBe(true);
   });
@@ -82,6 +108,11 @@ describe("isAlternateRelease", () => {
     "25 (Target Exclusive Edition)",
     "Scorpion (Explicit)",
     "Midnights (3am Edition)",
+    "Happier Than Ever (Tour Edition)",
+    "Alive 2007",
+    "Live. Love. A$AP",
+    "Live Like You Were Dying",
+    "Live It Up",
   ])("reads a studio release: %s", (name) => {
     expect(isAlternateRelease(name)).toBe(false);
   });
@@ -101,6 +132,18 @@ describe("isAlternateRelease", () => {
     "Greatest Hits Karaoke",
     "Starboy (Instrumentals)",
     "One Night Only Live",
+    "Live",
+    "Live!",
+    "Live 2012",
+    "Live '87",
+    "Live: The Last Night",
+    "The Livestream Concert",
+    "Golden Hour (Livestream)",
+    "Golden Hour (Global Livestream) - EP",
+    "Golden Hour Live Stream - Single",
+    "Golden Hour World Tour (Live)",
+    "Golden Hour in Concert",
+    "En Vivo Desde Madrid",
     "drivers license (Acoustic) - Single",
     "Fearless (Big Machine Radio Release Special)" + " [Commentary]",
   ])("skips a release of other versions: %s", (name) => {

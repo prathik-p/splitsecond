@@ -134,7 +134,10 @@ counts as the same song, and the plain original is the one kept. A single
 of a song already read isn't fetched at all. The albums read are remembered per artist, so
 a stopped seed continues and a later seed only reads new releases; a big artist takes a
 few minutes the first time. When these rules change in a newer version, the next seed
-clears each artist's songs out and reads them again under the new rules. These songs are marked `catalogOnly`: they come up only when
+clears each artist's songs out and reads them again under the new rules. Take an artist
+out of `artists.txt` and the next seed takes their catalogue out of the pool again (their
+chart hits stay). Songs that leave the pool are deleted from the database, except ones a
+played run points at, which stay with `inPool` false. These songs are marked `catalogOnly`: they come up only when
 their artist is picked under Run options, so an "All artists" run stays on the hits. A
 song that is also a chart hit counts as a hit. Apple gives no popularity figure, so the
 order its search lists an artist's songs in stands in for it when a run goes easy to hard.

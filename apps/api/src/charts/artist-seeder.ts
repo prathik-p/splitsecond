@@ -14,7 +14,8 @@ import { isAlternateRelease, isAlternateVersion } from "./release-rules";
  * is picked in the run options.
  *
  * Safe to stop and re-run: albums already read are remembered, so a later seed
- * only reads new releases.
+ * only reads new releases. An artist taken out of the file has their catalogue
+ * taken out of the pool again.
  */
 
 export interface ArtistSeedResult {
@@ -22,6 +23,8 @@ export interface ArtistSeedResult {
   artists: number;
   /** Songs added to the pool this time. */
   added: number;
+  /** Catalogue songs taken out because their artist is no longer in the file. */
+  removed: number;
   /** Lines of the file no artist was found for. */
   notFound: string[];
   /** True if Apple kept refusing lookups and the rest was left for the next seed. */
@@ -53,7 +56,7 @@ const actKey = (name: string) => normalizeArtist(name).replace(/^the /, "");
  * Bumped whenever the rules for what gets added change. An artist read under
  * older rules is cleared out and read again, so the pool matches the new rules.
  */
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 /** Shorter than this is an interlude or a skit. */
 const MIN_SONG_MS = 60_000;
 
@@ -90,7 +93,8 @@ export async function seedArtists(
   options: { log?: (message: string) => void } = {},
 ): Promise<ArtistSeedResult> {
   const log = options.log ?? (() => {});
-  const result: ArtistSeedResult = { artists: 0, added: 0, notFound: [], stopped: false };
+  const result: ArtistSeedResult = { artists: 0, added: 0, removed: 0, notFound: [], stopped: false };
+  const listed = new Set<bigint>();
 
   try {
     for (const line of lines) {
@@ -114,6 +118,7 @@ export async function seedArtists(
         });
       }
       result.artists++;
+      listed.add(row.itunesId);
       let albumsDone = row.albumsDone;
       if (row.rules !== RULES_VERSION) {
         if (albumsDone.length) log(`${row.name}: reading again, this time without remixes, live versions and the like`);
@@ -122,27 +127,62 @@ export async function seedArtists(
       }
       result.added += await seedOne(prisma, itunes, { id: String(row.itunesId), name: row.name }, albumsDone, log);
     }
+    // An artist no longer in the file leaves the pool. Not when a line went unrecognised,
+    // though: that may be the same artist with a typo, and re-reading a catalogue is slow.
+    if (result.notFound.length === 0) {
+      for (const row of await prisma.artistImport.findMany({ where: { itunesId: { notIn: [...listed] } } })) {
+        const gone = await clearArtist(prisma, String(row.itunesId));
+        await prisma.artistImport.delete({ where: { itunesId: row.itunesId } });
+        result.removed += gone;
+        log(`${row.name}: no longer in artists.txt, ${gone} ${gone === 1 ? "song" : "songs"} taken out`);
+      }
+    }
   } catch (err) {
     if (!(err as { rateLimited?: boolean }).rateLimited) throw err;
     // Apple has refused through every retry. Everything read so far is saved.
     result.stopped = true;
   }
+  await sweep(prisma);
   return result;
 }
 
-/** Take an artist's catalogue songs back out of the pool, so they can be read again under new rules. */
-async function clearArtist(prisma: PrismaClient, reference: string) {
+/**
+ * Take an artist's catalogue songs back out of the pool, so they can be read again
+ * under new rules or because the artist left the file. Returns how many left.
+ */
+async function clearArtist(prisma: PrismaClient, reference: string): Promise<number> {
   const links = await prisma.trackSource.findMany({ where: { kind: "artist", reference }, select: { trackId: true } });
-  // Hits stay; a catalogue song stays in the database (old runs point at it) but leaves the pool.
-  await prisma.track.updateMany({
-    where: { id: { in: links.map((l) => l.trackId) }, catalogOnly: true },
+  await prisma.trackSource.deleteMany({ where: { kind: "artist", reference } });
+  // Hits stay, and so does a song another listed artist's catalogue also holds (a duet).
+  const { count } = await prisma.track.updateMany({
+    where: { id: { in: links.map((l) => l.trackId) }, catalogOnly: true, inPool: true, sources: { none: { kind: "artist" } } },
     data: { inPool: false },
   });
-  await prisma.trackSource.deleteMany({ where: { kind: "artist", reference } });
   await prisma.artistImport.update({
     where: { itunesId: BigInt(reference) },
     data: { albumsDone: [], rules: RULES_VERSION },
   });
+  await sweep(prisma);
+  return count;
+}
+
+/**
+ * Delete catalogue songs that have left the pool, so they don't linger in the
+ * database. One that a played run or an imported profile points at has to stay;
+ * it just stays out of the pool.
+ */
+async function sweep(prisma: PrismaClient): Promise<number> {
+  const { count } = await prisma.track.deleteMany({
+    where: {
+      catalogOnly: true,
+      inPool: false,
+      sources: { none: {} },
+      rounds: { none: {} },
+      guesses: { none: {} },
+      profiles: { none: {} },
+    },
+  });
+  return count;
 }
 
 async function seedOne(

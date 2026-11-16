@@ -109,11 +109,17 @@ async function seedFromItunes() {
 /** artists.txt at the top of the project: artists whose every song should be in the pool. */
 async function seedArtistCatalogues(itunes: ItunesClient) {
   const file = process.env.ARTISTS_FILE || join(__dirname, "../../../artists.txt");
-  const lines = existsSync(file) ? parseArtistsFile(readFileSync(file, "utf8")) : [];
-  if (lines.length === 0) return;
-  console.log(`Adding the whole catalogue of ${lines.length} ${lines.length === 1 ? "artist" : "artists"} from artists.txt…`);
+  // Without the file nothing changes; an emptied file takes its artists out again.
+  if (!existsSync(file)) return;
+  const lines = parseArtistsFile(readFileSync(file, "utf8"));
+  if (lines.length === 0 && (await prisma.artistImport.count()) === 0) return;
+  console.log(
+    lines.length
+      ? `Adding the whole catalogue of ${lines.length} ${lines.length === 1 ? "artist" : "artists"} from artists.txt…`
+      : "artists.txt lists no artists now…",
+  );
   const result = await seedArtists(prisma, itunes, lines, { log: indent });
-  console.log(`  ${result.added} songs added.`);
+  console.log(`  ${result.added} songs added${result.removed ? `, ${result.removed} taken out` : ""}.`);
   if (result.stopped) {
     console.log("  Stopped early: Apple is still refusing lookups. Run the seed again in half an hour or so to continue.");
   }

@@ -143,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
 
   it("adds every original song once, and no live, remix or other versions", async () => {
     const result = await seed(["Nova Lane"]);
-    expect(result).toEqual({ artists: 1, added: 4, notFound: [], stopped: false });
+    expect(result).toEqual({ artists: 1, added: 4, removed: 0, notFound: [], stopped: false });
     // Three releases read. The live album, the remix EP, the single of an album track
     // and the compilation the artist only appears on are not even fetched.
     expect(mock.stats().albumLookups).toBe(3);
@@ -183,25 +183,47 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
   it("reads an artist again when the rules have changed, clearing out what the old rules let in", async () => {
     const before = await catalogue();
     const rows = await prisma.track.count({ where: mine });
-    // As an older version left it: a live recording in the pool, and every album marked as read.
-    const stale = await prisma.track.create({
+    // As an older version left it: live recordings in the pool, and every album marked as read.
+    const old = (n: number, title: string) =>
+      prisma.track.create({
+        data: {
+          itunesId: BigInt(ID + n),
+          title,
+          artist: "Nova Lane",
+          rank: 10_000,
+          songKey: songKey(title, "Nova Lane"),
+          catalogOnly: true,
+          sources: { create: { kind: "artist", reference: String(NOVA) } },
+        },
+      });
+    const stale = await old(12, "Only Ever Live (Live)");
+    const played = await old(11, "Glass Hearts (Live)");
+    // One of them came up in a run, so the run still points at it.
+    const run = await prisma.run.create({ data: { rounds: { create: { index: 0, trackId: played.id } } } });
+    runIds.push(run.id);
+    // And one left behind, out of the pool, by an earlier clear-out.
+    const leftover = await prisma.track.create({
       data: {
-        itunesId: BigInt(ID + 12),
-        title: "Only Ever Live (Live)",
+        itunesId: BigInt(ID + 21),
+        title: "Open Road (Extended Mix)",
         artist: "Nova Lane",
         rank: 10_000,
-        songKey: songKey("Only Ever Live (Live)", "Nova Lane"),
+        songKey: songKey("Open Road (Extended Mix)", "Nova Lane"),
         catalogOnly: true,
-        sources: { create: { kind: "artist", reference: String(NOVA) } },
+        inPool: false,
       },
     });
     await prisma.artistImport.update({ where: { itunesId: BigInt(NOVA) }, data: { rules: RULES_VERSION - 1 } });
 
     await seed(["Nova Lane"]);
     expect(log.some((m) => m.startsWith("Nova Lane: reading again"))).toBe(true);
-    expect((await prisma.track.findUniqueOrThrow({ where: { id: stale.id } })).inPool).toBe(false);
+    // Gone from the database, not just from the pool.
+    expect(await prisma.track.findUnique({ where: { id: stale.id } })).toBeNull();
+    expect(await prisma.track.findUnique({ where: { id: leftover.id } })).toBeNull();
+    // The one a run points at has to stay, but out of the pool.
+    expect(await prisma.track.findUnique({ where: { id: played.id } })).toMatchObject({ inPool: false });
     expect(await catalogue()).toEqual(before);
-    expect(await prisma.track.count({ where: mine })).toBe(rows + 1); // only the stale row is extra
+    expect(await prisma.track.count({ where: mine })).toBe(rows + 1);
     expect(await prisma.artistImport.findUnique({ where: { itunesId: BigInt(NOVA) } })).toMatchObject({ rules: RULES_VERSION });
     // The hit was never taken out of the pool.
     expect(await prisma.track.findFirst({ where: { itunesId: BigInt(ID + 7) } })).toMatchObject({ inPool: true, catalogOnly: false });
@@ -212,6 +234,9 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     expect(result).toMatchObject({ artists: 1, added: 0, notFound: ["Nova"] });
     expect(await prisma.artistImport.findUnique({ where: { itunesId: BigInt(ECHO) } })).toMatchObject({ name: "Echo Park" });
     expect(log.some((m) => m.includes('"Nova": no artist with exactly that name') && m.includes("closest: Nova Lane"))).toBe(true);
+    // A line that wasn't recognised may be a typo for an artist already in, so nothing is taken out.
+    expect(result.removed).toBe(0);
+    expect(await prisma.artistImport.count({ where: { itunesId: BigInt(NOVA) } })).toBe(1);
   });
 
   it("stops cleanly when Apple refuses lookups", async () => {
@@ -238,5 +263,24 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     expect(answers.every((r) => r.track.artist.includes("Nova Lane"))).toBe(true);
     // Easy to hard: the hit first.
     expect(answers[0].track.title).toBe("Glass Hearts");
+  });
+
+  it("takes an artist's catalogue out again once the artist leaves the file", async () => {
+    const played = await prisma.round.findMany({ where: { runId: { in: runIds } }, select: { trackId: true } });
+    const result = await seed(["Echo Park"]);
+    // Five deep cuts leave; the chart hit is in the pool in its own right.
+    expect(result).toMatchObject({ artists: 1, removed: 5, notFound: [] });
+    expect(log).toContain("Nova Lane: no longer in artists.txt, 5 songs taken out");
+    expect(await prisma.artistImport.count({ where: { itunesId: BigInt(NOVA) } })).toBe(0);
+    const left = await prisma.track.findMany({ where: mine });
+    expect(left.filter((t) => t.inPool).map((t) => t.title)).toEqual(["Glass Hearts"]);
+    // What stays in the database is only what a played run points at.
+    const kept = new Set(played.map((r) => r.trackId));
+    expect(left.filter((t) => !t.inPool).every((t) => kept.has(t.id))).toBe(true);
+    expect(left.filter((t) => !t.inPool).length).toBeGreaterThan(0);
+
+    // Back in the file, the catalogue is read again.
+    expect(await seed(["Nova Lane", "Echo Park"])).toMatchObject({ artists: 2, added: 5, removed: 0 });
+    expect((await catalogue()).map((t) => t.title)).toEqual(["Brand New", "Duet", "Glass Hearts", "Next Chapter", "Open Road", "Vault Song"]);
   });
 });
