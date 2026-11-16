@@ -1,6 +1,6 @@
 /** Shortest snippet a round starts with, in seconds. */
 export const MIN_SECONDS = 0.1;
-/** Longest snippet a player can unlock (Deezer previews are 30s). */
+/** Longest snippet a player can unlock (Apple previews are 30s). */
 export const MAX_SECONDS = 30;
 /** Points for a correct guess at MIN_SECONDS with no wrong guesses. */
 export const MAX_POINTS = 10_000;

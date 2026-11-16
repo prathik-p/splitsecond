@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { normalizeArtist, normalizeTitle, songKey } from "@splitsecond/shared";
 import type { CatalogTrack } from "../catalog/types";
 import type { ItunesAlbum, ItunesArtist, ItunesClient } from "../itunes/itunes-client";
-import { sameArtist } from "../profiles/match";
+import { sameArtist } from "../catalog/match";
 import { isAlternateRelease, isAlternateTrack, isAlternateVersion } from "./release-rules";
 
 /**
@@ -168,7 +168,7 @@ async function clearArtist(prisma: PrismaClient, reference: string): Promise<num
 
 /**
  * Delete catalogue songs that have left the pool, so they don't linger in the
- * database. One that a played run or an imported profile points at has to stay;
+ * database. One that a played run points at has to stay;
  * it just stays out of the pool.
  */
 async function sweep(prisma: PrismaClient): Promise<number> {
@@ -179,7 +179,6 @@ async function sweep(prisma: PrismaClient): Promise<number> {
       sources: { none: {} },
       rounds: { none: {} },
       guesses: { none: {} },
-      profiles: { none: {} },
     },
   });
   return count;
@@ -277,7 +276,7 @@ async function save(
   const key = songKey(song.title, song.artist);
   const existing =
     (await prisma.track.findFirst({
-      // A song taken out of the pool earlier (or only in an imported profile) is reused, not duplicated.
+      // A song taken out of the pool earlier is reused, not duplicated.
       where: { OR: [{ itunesId: BigInt(song.id) }, { songKey: key }] },
       orderBy: [{ inPool: "desc" }, { rank: "desc" }],
     })) ?? (sameTitleId ? await prisma.track.findUnique({ where: { id: sameTitleId } }) : null);
@@ -307,7 +306,7 @@ async function save(
     isNew = true;
   } else {
     trackId = existing.id;
-    // In the database from someone's imported profile, but new to the pool.
+    // In the database but out of the pool until now.
     isNew = !existing.inPool;
     // Among several releases of a catalogue song, keep the plain original: an untouched
     // title beats "(Remastered)" or "(X's Version)", the artist alone beats a duet version,
@@ -327,7 +326,7 @@ async function save(
       where: { id: existing.id },
       data: {
         inPool: true,
-        // A song that was only in someone's imported profile joins the pool as a catalogue song.
+        // A song that was out of the pool comes back as a catalogue song.
         catalogOnly: existing.inPool ? existing.catalogOnly : true,
         genre: existing.genre ?? song.genre ?? null,
         year: existing.year ?? yearOf(song),

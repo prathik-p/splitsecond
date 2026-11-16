@@ -8,7 +8,7 @@
  */
 
 const FADE_SECONDS = 0.008;
-/** MP3 decoders emit a few ms of silence before the first real sample. */
+/** Decoders emit a few ms of silence before the first real sample. */
 const MAX_LEAD_IN_SECONDS = 0.06;
 
 export interface LoadedClip {

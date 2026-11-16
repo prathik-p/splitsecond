@@ -8,13 +8,11 @@
  */
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { activeProvider } from "../src/catalog/catalog.service";
 import { sliceM4a } from "../src/audio/m4a";
 import { currentChartIds } from "../src/charts/apple-chart";
 import { chooseForEntry } from "../src/charts/billboard-seeder";
 import { WikipediaCharts } from "../src/charts/wikipedia-charts";
 import { ItunesClient } from "../src/itunes/itunes-client";
-import { LastfmClient } from "../src/lastfm/lastfm-client";
 
 let failures = 0;
 
@@ -28,10 +26,6 @@ async function check(name: string, needed: boolean, run: () => Promise<string>) 
 }
 
 async function main() {
-  const provider = activeProvider();
-  console.log(`Music provider: ${provider}\n`);
-  const usingItunes = provider === "itunes";
-
   await check("Database", true, async () => {
     const prisma = new PrismaClient();
     try {
@@ -50,7 +44,7 @@ async function main() {
     country: process.env.ITUNES_COUNTRY || undefined,
   });
   let previewUrl: string | null = null;
-  await check("iTunes search", usingItunes, async () => {
+  await check("iTunes search", true, async () => {
     const results = await itunes.search("Hey Ya!", "OutKast");
     const hit = chooseForEntry({ position: 1, title: "Hey Ya!", artist: "OutKast" }, 2004, results);
     if (!hit) {
@@ -61,7 +55,7 @@ async function main() {
     return `${results.length} results, matched "${hit.title}" by ${hit.artist} (released ${hit.releaseDate?.slice(0, 10)})`;
   });
 
-  await check("iTunes preview audio", usingItunes, async () => {
+  await check("iTunes preview audio", true, async () => {
     if (!previewUrl) throw new Error("no preview URL to test (search failed)");
     const res = await fetch(previewUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(previewUrl).host}`);
@@ -77,27 +71,13 @@ async function main() {
     return `${ids.length} songs from ${new URL(feedUrl).host}`;
   });
 
-  await check("Wikipedia year-end chart (2005)", usingItunes, async () => {
+  await check("Wikipedia year-end chart (2005)", true, async () => {
     const list = await new WikipediaCharts(process.env.WIKIPEDIA_API_BASE || undefined, {
       userAgent: process.env.WIKIPEDIA_USER_AGENT || undefined,
     }).yearEnd(2005);
     if (list.length < 50) throw new Error(`parsed only ${list.length} entries; the page layout may have changed`);
     const [first] = list;
     return `${list.length} entries, number ${first.position} is "${first.title}" by ${first.artist}`;
-  });
-
-  await check("Deezer", !usingItunes, async () => {
-    const res = await fetch(`${process.env.DEEZER_API_BASE || "https://api.deezer.com"}/infos`);
-    const infos = (await res.json()) as { open?: boolean; country?: string };
-    if (infos.open === false) throw new Error(`not available in ${infos.country ?? "this country"}`);
-    return `available in ${infos.country ?? "this country"}`;
-  });
-
-  await check("Last.fm", false, async () => {
-    const key = process.env.LASTFM_API_KEY;
-    if (!key) throw new Error("LASTFM_API_KEY is not set (only needed for importing Last.fm profiles)");
-    const name = await new LastfmClient(key, process.env.LASTFM_API_BASE || undefined).displayName("rj");
-    return `key works (looked up user ${name})`;
   });
 
   console.log(failures ? `\n${failures} required check${failures === 1 ? "" : "s"} failed.` : "\nEverything needed is reachable.");

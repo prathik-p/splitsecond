@@ -111,7 +111,6 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
     });
     itunes = new ItunesClient({ baseUrl: mock.url, perMinute: 60_000, backoffMs: 1, attempts: 2 });
     process.env.ITUNES_API_BASE = mock.url;
-    process.env.MUSIC_PROVIDER = "itunes";
     prisma = new PrismaService();
     await prisma.$connect();
     await prisma.track.deleteMany({ where: mine });
@@ -255,9 +254,9 @@ describe.skipIf(!process.env.DATABASE_URL)("artist catalogues", () => {
 
     // With all artists, only the one hit counts, which isn't enough for a run.
     await expect(game.createRun()).rejects.toThrow(/needs at least 5 songs/);
-    await expect(game.createRun(null, null, { genres: ["Pop"] })).rejects.toThrow(/Only 1 song matches/);
+    await expect(game.createRun({ genres: ["Pop"] })).rejects.toThrow(/Only 1 song matches/);
 
-    const run = await game.createRun(null, null, { artists: ["Nova Lane"] });
+    const run = await game.createRun({ artists: ["Nova Lane"] });
     runIds.push(run.runId);
     const answers = await prisma.round.findMany({ where: { runId: run.runId }, include: { track: true }, orderBy: { index: "asc" } });
     expect(answers.every((r) => r.track.artist.includes("Nova Lane"))).toBe(true);

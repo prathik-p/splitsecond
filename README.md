@@ -43,21 +43,19 @@ makes the whole seed gentler.
 If the seed finds nothing or songs won't play, `pnpm check:services` tests each outside
 service from your machine and says which one is the problem.
 
-Seed and provider settings (environment or `apps/api/.env`):
+Seed settings (environment or `apps/api/.env`):
 
 | Setting | Default | |
 | --- | --- | --- |
-| `MUSIC_PROVIDER` | `itunes` | `itunes` works everywhere. `deezer` is not available in every country (India is one) |
 | `HITS_FROM`, `HITS_TO` | 2000, this year | Range of years to collect hits for |
 | `HITS_PER_YEAR` | 50 | How far down each year's chart to go; 0 skips the yearly hits |
 | `ITUNES_COUNTRY` | `US` | iTunes storefront to search |
 | `ITUNES_PER_MINUTE` | 19 | iTunes calls per minute |
 | `ARTISTS_FILE` | `artists.txt` at the top of the project | Artists whose whole catalogue is added |
 | `WIKIPEDIA_USER_AGENT` | a generic name | Optional. Wikipedia limits clients less when they name a contact, e.g. `my-app/1.0 (me@example.com)` |
-| `SEED_PLAYLISTS` | empty | Deezer only: extra playlist ids to add as they are |
 
 `pnpm test` runs the unit tests and, when `DATABASE_URL` is set, plays whole runs against
-Postgres and mock iTunes, Wikipedia, Deezer and Last.fm servers. `apps/api/test/mock-services.ts`
+Postgres and mock iTunes, Apple chart and Wikipedia servers. `apps/api/test/mock-services.ts`
 runs those mocks standalone, for working offline (see the comment at the top of that file).
 
 ## Layout
@@ -65,7 +63,7 @@ runs those mocks standalone, for working offline (see the comment at the top of 
 | Path | What |
 | --- | --- |
 | `packages/shared` | Scoring formula, log-scale maths, title normalising, API types. Used by both apps. |
-| `apps/api` | NestJS + Prisma. Runs, rounds, guesses, the iTunes, Deezer, Wikipedia and Last.fm clients, the seeders, profile import, audio proxy. |
+| `apps/api` | NestJS + Prisma. Runs, rounds, guesses, the iTunes and Wikipedia clients, the seeders, the audio proxy. |
 | `apps/web` | Next.js. Web Audio snippet player, scrubber, Fuse.js autocomplete. |
 
 ## How it works
@@ -77,30 +75,26 @@ runs those mocks standalone, for working offline (see the comment at the top of 
 3s→30s. Dragging only selects a length. Pressing play commits it, and it can't go back down.
 
 **Snippet player.** The clip is decoded to an `AudioBuffer` and played with
-`source.start(when, offset, duration)` through a `GainNode` with 8ms fades. MP3 decoder
+`source.start(when, offset, duration)` through a `GainNode` with 8ms fades. Decoder
 lead-in silence is detected and skipped so 0.1s is 0.1s of music.
 
 **Anti-cheat.** The browser only knows an opaque round id. `GET /api/rounds/:id/audio`
 fetches the preview server-side (cached in memory for 10 minutes), cuts it on frame
 boundaries, and returns only the unlocked part. Apple's previews are AAC in an MP4
 container, which can't simply be truncated, so the AAC frames are pulled out and re-wrapped
-as an ADTS stream; Deezer's MP3s are cut between frames. Titles, artists, covers and
-provider ids are sent only after the round ends. Later rounds are locked until the current
+as an ADTS stream. Titles, artists, covers and
+Apple ids are sent only after the round ends. Later rounds are locked until the current
 one is done.
 
-**The song pool.** The database holds only song details (title, artist, provider id, rank,
+**The song pool.** The database holds only song details (title, artist, Apple id, rank,
 year): about 1,300 small rows for 26 years at 50 a year. No audio is stored; each round
 fetches a 30s preview. The hits are the Billboard Year-End Hot 100 of each year, read from
 Wikipedia, and each song is matched to iTunes by title and artist, preferring the release
 from around that year over later re-recordings. Chart position becomes the song's rank, so
 a year's number 1 is "easy" and its number 50 is "hard". The year in progress has no
-year-end chart until December, so the seed also adds Apple's current chart (most played, or the iTunes top songs feed if that is down).
-
-**Providers.** `MUSIC_PROVIDER=itunes` (the default) uses Apple's iTunes Search API: no
-key, works worldwide. `MUSIC_PROVIDER=deezer` uses Deezer instead, which adds ISRCs and a
-real popularity rank but returns nothing playable in countries Deezer doesn't serve; its
-seed finds each year's hits through Deezer playlists named after the year. A track row can
-carry an id for either service.
+year-end chart until December, so the seed also adds Apple's current chart (most played,
+or the iTunes top songs feed if that is down). Everything comes from Apple's public iTunes
+Search API, which needs no key and works worldwide.
 
 **High score.** There are no accounts. The best score and the number of runs played are
 kept in `localStorage`, separately for each set of run options, since a run on one artist
@@ -118,9 +112,8 @@ give the answer away.
 correct if it is the same song after normalising ("feat.", "Remastered" and so on are
 ignored), so picking another release of the right song counts.
 
-**Difficulty.** The pool is sorted by `rank` (chart position, or Deezer's popularity) and
-split into five bands; a run takes one random song from each, best known first. In a
-profile run, songs with no rank are ordered by how often that listener played them.
+**Difficulty.** The pool is sorted by `rank` (chart position) and split into five bands;
+a run takes one random song from each, best known first.
 
 **Artist catalogues.** For each name in `artists.txt` the seed finds the artist on Apple
 (the name must match exactly; an Apple Music artist link works too), lists every album,
@@ -144,49 +137,30 @@ Apple has no original). These songs are marked `catalogOnly`: they come up only 
 their artist is picked under Run options, so an "All artists" run stays on the hits. A
 song that is also a chart hit counts as a hit. Apple gives no popularity figure, so the
 order its search lists an artist's songs in stands in for it when a run goes easy to hard.
-Removing a name from the file doesn't remove the songs already added.
 
 **Skipping and the replay.** "Skip to …" unlocks the next marked length (0.5s, 1s, 2s, 4s,
 8s, 15s, 30s) and plays it; dragging the scrubber still works for lengths in between. When
 a round ends, by a correct guess or by giving up, the song's preview plays by itself (the
 same 30 seconds the clips were cut from) until you stop it or move on.
 
-**Last.fm profiles (server only).** The lobby no longer offers this, but the API still has
-it, for a later "several profiles in one game" mode. It needs `LASTFM_API_KEY` in
-`apps/api/.env`. Importing a username fetches that user's top tracks (200 by default,
-`LASTFM_TOP_LIMIT`) and loved tracks, merges duplicates, and matches each song to the
-music provider: a search, then the first result whose normalised title and artist match
-and that has a preview. On Deezer the track's ISRC is also looked up, so two ids for the
-same recording become one `Track`. A track is shared by every profile that has it. The
-import runs in the background and the lobby shows its progress; on iTunes it is paced at
-about 20 songs a minute, so 200 songs take around ten minutes. A run started from a profile draws its
-five songs and its autocomplete list from that profile only.
-
 ## API
 
 | Method | Path | |
 | --- | --- | --- |
 | GET | `/api/pool` | Songs in the default (hits) pool |
-| GET | `/api/pool/summary` | Size and year range of the default pool |
 | GET | `/api/pool/options` | Genres and artists a run can be limited to, with each song's genre and artists as indexes |
-| GET | `/api/profiles` | Imported profiles and their import status |
-| POST | `/api/profiles` | Import a Last.fm user (`{ username, refresh? }`) |
-| GET | `/api/profiles/:id` | One profile, polled for import progress |
-| POST | `/api/runs` | Start a run (`{ genres?, artists?, profileId? }`; empty lists mean any) |
+| POST | `/api/runs` | Start a run (`{ genres?, artists? }`; empty lists mean any) |
 | GET | `/api/runs/:id` | Run state, used to resume |
 | GET | `/api/runs/:id/pool` | Guessable songs for that run's autocomplete |
 | POST | `/api/rounds/:id/unlock` | `{ seconds }`, only ever increases |
-| GET | `/api/rounds/:id/audio` | MP3 of the unlocked part |
+| GET | `/api/rounds/:id/audio` | AAC (ADTS) of the unlocked part, or the whole preview once the round is over |
 | POST | `/api/rounds/:id/guess` | `{ trackId }` |
 | POST | `/api/rounds/:id/give-up` | End the round for 0 points |
-| GET | `/api/leaderboard` | Best finished runs on the server. Not shown in the app yet; kept for multiplayer |
 
 ## Next steps
 
-A run is linked to its profiles through a many-to-many relation and the pool query already
-takes a list of profile ids, so several profiles in one game (step 3) needs a picker, a
-per-profile weighting when choosing songs, and the "whose song is this?" round, without
-schema changes to the game tables. Multiplayer (step 4) will need the timing moved
-server-side, which is why unlocks and scores already live on the server.
+Multiplayer rooms will need the timing moved server-side, which is why unlocks and scores
+already live on the server.
 
-Before going public, check the API terms of Apple (iTunes Search), Last.fm and, if used, Deezer.
+Song details, cover art and 30-second previews come from Apple's iTunes Search API and
+remain Apple's; check its terms before running this anywhere public.

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Query, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Get, Header, Param, Post, StreamableFile } from "@nestjs/common";
 import { GameService } from "./game.service";
 
 @Controller()
@@ -11,11 +11,6 @@ export class GameController {
     return this.game.pool();
   }
 
-  @Get("pool/summary")
-  poolSummary() {
-    return this.game.poolSummary();
-  }
-
   /** Genres and artists the default pool can be narrowed to, for the lobby's run options. */
   @Get("pool/options")
   poolOptions() {
@@ -23,8 +18,8 @@ export class GameController {
   }
 
   @Post("runs")
-  createRun(@Body() body: { nickname?: string; profileId?: string; genres?: string[]; artists?: string[] } = {}) {
-    return this.game.createRun(body?.nickname, body?.profileId, { genres: body?.genres, artists: body?.artists });
+  createRun(@Body() body: { genres?: string[]; artists?: string[] } = {}) {
+    return this.game.createRun({ genres: body?.genres, artists: body?.artists });
   }
 
   @Get("runs/:id/pool")
@@ -58,11 +53,5 @@ export class GameController {
   @Post("rounds/:id/give-up")
   giveUp(@Param("id") id: string) {
     return this.game.giveUp(id);
-  }
-
-  @Get("leaderboard")
-  leaderboard(@Query("limit") limit?: string, @Query("profileId") profileId?: string) {
-    const n = Math.min(100, Math.max(1, Number(limit) || 20));
-    return this.game.leaderboard(n, profileId || undefined);
   }
 }

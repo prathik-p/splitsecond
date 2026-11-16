@@ -80,7 +80,6 @@ export interface ItunesOptions {
 const SLOWEST_PER_MINUTE = 8;
 
 export class ItunesClient implements Catalog {
-  readonly provider = "itunes" as const;
   private readonly baseUrl: string;
   private readonly country: string;
   private gapMs: number;
@@ -256,7 +255,6 @@ function toTrack(song: ItunesSong): CatalogTrack | null {
   if (song.wrapperType !== "track" || (song.kind && song.kind !== "song")) return null;
   if (!song.trackId || !song.trackName || !song.artistName) return null;
   return {
-    provider: "itunes",
     id: String(song.trackId),
     title: song.trackName,
     artist: song.artistName,
@@ -264,7 +262,6 @@ function toTrack(song: ItunesSong): CatalogTrack | null {
     // Apple serves any size from the same path; 100px is too small for the reveal card.
     coverUrl: song.artworkUrl100?.replace(/\/100x100(bb)?\./, "/300x300$1.") ?? null,
     rank: 0,
-    isrc: null,
     genre: song.primaryGenreName?.trim() || null,
     durationMs: song.trackTimeMillis ?? null,
     releaseDate: song.releaseDate ?? null,

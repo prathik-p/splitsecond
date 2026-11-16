@@ -99,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
       "Second Of 2006",
       "Third Of 2006",
     ]);
-    expect(saved.every((t) => t.inPool && t.deezerId === null && t.previewUrl?.endsWith(".m4a"))).toBe(true);
+    expect(saved.every((t) => t.inPool && t.previewUrl?.endsWith(".m4a"))).toBe(true);
     expect(saved[0].coverUrl).toMatch(/300x300bb\.jpg$/);
     expect(saved.map((t) => t.genre)).toEqual(["Pop", null, null, "Hip-Hop/Rap", null, null]);
 
@@ -258,7 +258,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Billboard seed on iTunes", () => {
   });
 
   it("plays a run on iTunes tracks, serving only the unlocked AAC", async () => {
-    process.env.MUSIC_PROVIDER = "itunes";
     process.env.ITUNES_API_BASE = mock.url;
     process.env.ITUNES_PER_MINUTE = "60000";
     const music = new CatalogService(prisma);

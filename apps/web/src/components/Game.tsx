@@ -124,7 +124,7 @@ export function Game() {
     setRun(r);
     if (r.finished) {
       store(RUN_KEY, null);
-      setOutcome(recordRun(r.source?.profileId ?? filtersKey(r.filters), r.runId, r.totalScore));
+      setOutcome(recordRun(filtersKey(r.filters), r.runId, r.totalScore));
     }
   }, []);
 
@@ -194,9 +194,7 @@ export function Game() {
           key={round.roundId}
           round={round}
           pool={pool}
-          sourceLabel={
-            run.source ? `${run.source.displayName}'s Last.fm` : describeChosen(run.filters)
-          }
+          sourceLabel={describeChosen(run.filters)}
           isLast={viewIndex === RUN_LENGTH - 1}
           onRunChange={onRunChange}
           onError={setError}

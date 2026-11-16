@@ -1,26 +1,16 @@
-/**
- * A music service the game can search and play previews from. Deezer and
- * Apple's iTunes Search API both fit; which one is used is set by
- * MUSIC_PROVIDER, because Deezer doesn't serve every country.
- */
-export type Provider = "deezer" | "itunes";
-
+/** A song as Apple's iTunes Search API describes it. */
 export interface CatalogTrack {
-  provider: Provider;
-  /** The provider's id for the track. */
+  /** Apple's track id. */
   id: string;
   title: string;
-  /** Other spellings of the title to match against (Deezer's title_short). */
-  altTitle?: string;
   artist: string;
   album: string | null;
   coverUrl: string | null;
-  /** Popularity, higher is better known. 0 if the provider doesn't say. */
+  /** Popularity, higher is better known. 0 where Apple doesn't say. */
   rank: number;
-  isrc: string | null;
-  /** Length of the whole song in milliseconds, where the provider says. */
+  /** Length of the whole song in milliseconds, where Apple says. */
   durationMs?: number | null;
-  /** The provider's genre name, where it gives one (iTunes does). */
+  /** Apple's genre name ("Pop", "Hip-Hop/Rap"). */
   genre?: string | null;
   /** "YYYY-MM-DD" (possibly longer), or null. */
   releaseDate: string | null;
@@ -29,10 +19,10 @@ export interface CatalogTrack {
   playable: boolean;
 }
 
+/** Where songs are searched for: the iTunes client, or a stand-in in tests. */
 export interface Catalog {
-  readonly provider: Provider;
   /** Candidates for a song, best first. */
-  search(title: string, artist: string): Promise<CatalogTrack[]>;
-  /** Full details for one track (adds the ISRC on Deezer). null if it no longer exists. */
+  search(title: string, artist: string, limit?: number): Promise<CatalogTrack[]>;
+  /** Full details for one track. null if it no longer exists. */
   track(id: string): Promise<CatalogTrack | null>;
 }

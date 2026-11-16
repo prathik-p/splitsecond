@@ -13,14 +13,12 @@ const ID = 960_000_000;
 const ARTIST = "twenty one pilots";
 
 const found = (n: number, title: string, album: string, year: number): CatalogTrack => ({
-  provider: "itunes",
   id: String(ID + n),
   title,
   artist: ARTIST,
   album,
   coverUrl: `https://example.test/${n}.jpg`,
   rank: 0,
-  isrc: null,
   releaseDate: `${year}-05-15T07:00:00Z`,
   previewUrl: `https://example.test/${n}.m4a`,
   playable: true,
@@ -38,7 +36,6 @@ const catalog: Record<string, CatalogTrack[]> = {
 };
 const searches: string[] = [];
 const fake = {
-  provider: "itunes" as const,
   search: async (title: string) => {
     searches.push(title);
     return catalog[title] ?? [];

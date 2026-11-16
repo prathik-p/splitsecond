@@ -1,35 +1,38 @@
 /**
- * Plays whole runs against a real Postgres and a mock Deezer.
+ * Plays whole runs against a real Postgres and a mock iTunes.
  * Needs DATABASE_URL; skipped otherwise. It only touches rows it creates.
  */
 import "dotenv/config";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RUN_LENGTH, basePoints, songKey } from "@splitsecond/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { CatalogService } from "../catalog/catalog.service";
 import { GameService } from "./game.service";
-import { FRAME_BYTES, fakeMp3, startMockDeezer, MockTrack } from "../../test/fixtures";
+import { sliceM4a } from "../audio/m4a";
+import { MockItunesSong, startMockApple } from "../../test/fixtures";
 
 const ID_BASE = 990_000_000;
-const tracks: MockTrack[] = Array.from({ length: 12 }, (_, i) => ({
+const m4a = readFileSync(join(__dirname, "../../test/data/tone-fast.m4a")); // 3 seconds
+const tracks = Array.from({ length: 12 }, (_, i) => ({
   id: ID_BASE + i,
   title: `Test Song ${i}`,
   artist: `Test Artist ${i}`,
   rank: 1_000_000 - i * 50_000,
-  isrc: `TEST${String(i).padStart(8, "0")}`,
 }));
+const songs: MockItunesSong[] = tracks.map((t) => ({ id: t.id, title: t.title, artist: t.artist }));
 
 describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
   let prisma: PrismaService;
   let game: GameService;
-  let mock: Awaited<ReturnType<typeof startMockDeezer>>;
+  let mock: Awaited<ReturnType<typeof startMockApple>>;
   let previousPool: string[] = [];
   const runIds: string[] = [];
 
   beforeAll(async () => {
-    mock = await startMockDeezer(tracks, fakeMp3(1200));
-    process.env.DEEZER_API_BASE = mock.url;
-    process.env.MUSIC_PROVIDER = "deezer";
+    mock = await startMockApple(songs, m4a);
+    process.env.ITUNES_API_BASE = mock.url;
     prisma = new PrismaService();
     await prisma.$connect();
     game = new GameService(prisma, new CatalogService(prisma));
@@ -40,8 +43,8 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     await prisma.track.updateMany({ where: { id: { in: previousPool } }, data: { inPool: false } });
     await prisma.track.createMany({
       data: tracks.map((t) => ({
-        deezerId: BigInt(t.id),
-        isrc: t.isrc,
+        itunesId: BigInt(t.id),
+        previewUrl: `${mock.url}/preview/${t.id}.m4a`,
         title: t.title,
         artist: t.artist,
         rank: t.rank,
@@ -54,14 +57,14 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
 
   afterAll(async () => {
     await prisma.run.deleteMany({ where: { id: { in: runIds } } });
-    await prisma.track.deleteMany({ where: { deezerId: { gte: BigInt(ID_BASE), lt: BigInt(ID_BASE + 100) } } });
+    await prisma.track.deleteMany({ where: { itunesId: { gte: BigInt(ID_BASE), lt: BigInt(ID_BASE + 100) } } });
     await prisma.track.updateMany({ where: { id: { in: previousPool } }, data: { inPool: true } });
     await prisma.$disconnect();
     await mock.close();
   });
 
   const newRun = async () => {
-    const run = await game.createRun("  tester  ");
+    const run = await game.createRun();
     runIds.push(run.runId);
     return run;
   };
@@ -78,7 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
   });
 
   it("limits a run to the chosen genres and artists", async () => {
-    const rock = await game.createRun(null, null, { genres: ["Rock"] });
+    const rock = await game.createRun({ genres: ["Rock"] });
     runIds.push(rock.runId);
     expect(rock.filters).toEqual({ genres: ["Rock"], artists: [] });
     const rockAnswers = await Promise.all(rock.rounds.map((r) => answerOf(r.roundId)));
@@ -88,7 +91,7 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     expect((await game.getRun(rock.runId)).filters).toEqual({ genres: ["Rock"], artists: [] });
 
     const names = [1, 3, 5, 8, 10, 11].map((i) => `Test Artist ${i}`);
-    const picked = await game.createRun(null, null, { artists: names });
+    const picked = await game.createRun({ artists: names });
     runIds.push(picked.runId);
     const artists = (await Promise.all(picked.rounds.map((r) => answerOf(r.roundId)))).map((t) => t.artist);
     expect(artists.every((a) => names.includes(a))).toBe(true);
@@ -96,22 +99,20 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
 
     // Songs outside the options can still be guessed (and are simply wrong).
     const [first] = picked.rounds;
-    const outsider = await prisma.track.findFirstOrThrow({ where: { deezerId: BigInt(ID_BASE) } });
+    const outsider = await prisma.track.findFirstOrThrow({ where: { itunesId: BigInt(ID_BASE) } });
     expect((await game.guess(first.roundId, outsider.id)).correct).toBe(false);
   });
 
   it("refuses options that leave too few songs, saying how many there are", async () => {
-    await expect(game.createRun(null, null, { genres: ["Pop"], artists: ["Test Artist 2", "Test Artist 9"] })).rejects.toThrow(
+    await expect(game.createRun({ genres: ["Pop"], artists: ["Test Artist 2", "Test Artist 9"] })).rejects.toThrow(
       /Only 1 song matches these options/,
     );
-    await expect(game.createRun(null, null, { artists: ["Nobody At All"] })).rejects.toThrow(/Only 0 songs match/);
+    await expect(game.createRun({ artists: ["Nobody At All"] })).rejects.toThrow(/Only 0 songs match/);
   });
 
   it("builds a 5-song run ordered easy to hard, without leaking answers", async () => {
     const run = await newRun();
     expect(run.rounds).toHaveLength(RUN_LENGTH);
-    expect(run.nickname).toBe("tester");
-    expect(run.source).toBeNull();
     expect(run.filters).toEqual({ genres: [], artists: [] });
     expect(run.rounds.every((r) => r.answer === null && r.status === "playing")).toBe(true);
     expect(JSON.stringify(run)).not.toMatch(/Test Song|9900000/);
@@ -127,13 +128,14 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     const id = run.rounds[0].roundId;
 
     const first = (await game.audio(id)).data;
-    expect(first.length).toBeLessThanOrEqual(8 * FRAME_BYTES); // 0.1s plus decoder margin
+    expect(first.length).toBe(sliceM4a(m4a, 0.1).aac.length);
 
     expect((await game.unlock(id, 2.07)).unlockedSeconds).toBe(2);
     expect((await game.unlock(id, 0.5)).unlockedSeconds).toBe(2);
     const more = (await game.audio(id)).data;
+    expect(more.length).toBe(sliceM4a(m4a, 2).aac.length);
     expect(more.length).toBeGreaterThan(first.length);
-    expect(more.length).toBeLessThan(90 * FRAME_BYTES); // ~2s, nowhere near the full clip
+    expect(more.length).toBeLessThan(sliceM4a(m4a, Infinity).aac.length);
 
     await expect(game.unlock(id, "abc")).rejects.toThrow();
     // Later rounds stay locked until the current one is done.
@@ -179,8 +181,8 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     await expect(game.guess(r0.roundId, answer0.id)).rejects.toThrow(/already over/);
     await expect(game.unlock(r0.roundId, 30)).rejects.toThrow(/already over/);
     const full = await game.audio(r0.roundId);
-    expect(full.data.length).toBe(1200 * FRAME_BYTES);
-    expect(full.contentType).toBe("audio/mpeg");
+    expect(full.data.length).toBe(sliceM4a(m4a, Infinity).aac.length);
+    expect(full.contentType).toBe("audio/aac");
 
     const gaveUp = await game.giveUp(r1.roundId);
     expect(gaveUp.round.status).toBe("given_up");
@@ -189,18 +191,12 @@ describe.skipIf(!process.env.DATABASE_URL)("game flow", () => {
     expect(gaveUp.run.finished).toBe(false);
   });
 
-  it("finishes the run and ranks it on the leaderboard", async () => {
+  it("finishes the run once every round is over", async () => {
     const run = await newRun();
     let last;
     for (const r of run.rounds) last = await game.guess(r.roundId, (await answerOf(r.roundId)).id);
     expect(last!.run.finished).toBe(true);
     expect(last!.run.totalScore).toBe(RUN_LENGTH * 10_000);
-
-    const board = await game.leaderboard(100);
-    const mine = board.find((e) => e.runId === run.runId);
-    expect(mine).toMatchObject({ nickname: "tester", totalScore: 50_000 });
-    // Unfinished runs are not listed.
-    expect(board.every((e) => e.runId !== runIds[0])).toBe(true);
   });
 
   it("lists the pool for autocomplete", async () => {

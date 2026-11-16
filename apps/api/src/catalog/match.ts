@@ -12,18 +12,8 @@ export function findMatches(title: string, artist: string, candidates: CatalogTr
   if (!wantTitle || !artist.trim()) return [];
   return candidates.filter((c) => {
     if (!c.playable) return false;
-    const titles = [c.title, c.altTitle].filter((t): t is string => !!t).map(normalizeTitle);
-    return titles.includes(wantTitle) && sameArtist(artist, c.artist);
+    return normalizeTitle(c.title) === wantTitle && sameArtist(artist, c.artist);
   });
-}
-
-/** The best match: the most popular one, or the first where popularity is unknown. */
-export function pickMatch(title: string, artist: string, candidates: CatalogTrack[]): CatalogTrack | null {
-  let best: CatalogTrack | null = null;
-  for (const c of findMatches(title, artist, candidates)) {
-    if (!best || c.rank > best.rank) best = c;
-  }
-  return best;
 }
 
 const JOINERS = /\s*(?:,|&|\+|\/|\band\b|\bwith\b|\bx\b|\bvs\.?(?=\s)|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b)\s*/i;

@@ -7,21 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// A song in the playable pool. Later steps (Last.fm import, profiles) attach
-/// sources to tracks through TrackSource without changing this table.
+/// A song: in the playable pool, or kept out of it because a played run points at it.
 model Track {
   id         String   @id @default(cuid())
-  /// Where the audio comes from: a track has a Deezer id, an iTunes id, or both.
-  deezerId   BigInt?  @unique
+  /// Apple's id for the recording; the audio is its 30-second preview.
   itunesId   BigInt?  @unique
   /// Last known preview URL (iTunes). Refreshed by a lookup if it stops working.
   previewUrl String?
-  isrc       String?  @unique
   title      String
   artist     String
   album      String?
   coverUrl   String?
-  /// Popularity, higher is easier: Deezer's rank, or one derived from a chart position.
+  /// Popularity, higher is easier: derived from a chart position or Apple's listing order.
   rank       Int
   /// The year the song was a hit, when it came from a by-year seed.
   year       Int?
@@ -38,18 +35,17 @@ model Track {
   rounds   Round[]
   guesses  Guess[]
   sources  TrackSource[]
-  profiles ProfileTrack[]
 
   @@index([inPool, rank])
   @@index([songKey])
 }
 
-/// Where a track came from: the fixed seed pool now, user profiles later.
+/// Why a track is in the pool: a chart entry, Apple's current chart, or an artist catalogue.
 model TrackSource {
   id        String   @id @default(cuid())
   trackId   String
-  kind      String   // "seed" | "lastfm" | "deezer_playlist" | ...
-  reference String   // playlist id, username, ...
+  kind      String   // "billboard" | "apple-chart" | "artist"
+  reference String   // "2016:3" (year:position), "most-played", or Apple's artist id
   createdAt DateTime @default(now())
 
   track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
@@ -77,7 +73,6 @@ model ArtistImport {
 
 model Run {
   id         String    @id @default(cuid())
-  nickname   String?
   totalScore Int       @default(0)
   createdAt  DateTime  @default(now())
   finishedAt DateTime?
@@ -85,11 +80,7 @@ model Run {
   genres     String[]  @default([])
   artists    String[]  @default([])
 
-  rounds   Round[]
-  /// Profiles whose songs this run draws from. Empty means the default pool.
-  profiles Profile[] @relation("RunProfiles")
-
-  @@index([finishedAt, totalScore])
+  rounds Round[]
 }
 
 enum RoundStatus {
@@ -98,7 +89,7 @@ enum RoundStatus {
   GIVEN_UP
 }
 
-/// The round id is what the browser sees. It never learns the Deezer id
+/// The round id is what the browser sees. It never learns the track's id
 /// until the round is over.
 model Round {
   id              String      @id @default(cuid())
@@ -129,47 +120,4 @@ model Guess {
 
   round        Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
   guessedTrack Track @relation(fields: [guessedTrackId], references: [id])
-}
-
-enum ImportStatus {
-  PENDING
-  RUNNING
-  DONE
-  FAILED
-}
-
-/// A listener whose music can be played, e.g. a Last.fm username.
-model Profile {
-  id          String       @id @default(cuid())
-  source      String       // "lastfm" today
-  /// Lower-cased, so "RJ" and "rj" are the same profile.
-  username    String
-  displayName String
-  status      ImportStatus @default(PENDING)
-  /// Import progress: songs found on the source, looked at so far, and matched to Deezer.
-  total       Int          @default(0)
-  processed   Int          @default(0)
-  matched     Int          @default(0)
-  error       String?
-  importedAt  DateTime?
-  createdAt   DateTime     @default(now())
-
-  tracks ProfileTrack[]
-  runs   Run[]          @relation("RunProfiles")
-
-  @@unique([source, username])
-}
-
-/// A song a profile listens to. One Track can belong to many profiles.
-model ProfileTrack {
-  profileId String
-  trackId   String
-  playcount Int     @default(0)
-  loved     Boolean @default(false)
-
-  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  track   Track   @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
-  @@id([profileId, trackId])
-  @@index([trackId])
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseYearEndPage, retryAfterMs } from "./wikipedia-charts";
 import { chartIdsFromFeed } from "./apple-chart";
-import { chooseForEntry, leadArtist, rankForPosition } from "./billboard-seeder";
+import { chooseForEntry, leadArtist, rankForPosition, releaseFitsYear } from "./billboard-seeder";
 import type { CatalogTrack } from "../catalog/types";
 import { yearEndHtml } from "../../test/fixtures";
 
@@ -42,7 +42,7 @@ describe("parseYearEndPage", () => {
 
 describe("matching chart entries to the catalog", () => {
   const song = (id: string, title: string, artist: string, releaseDate: string | null = null): CatalogTrack => ({
-    provider: "itunes", id, title, artist, album: null, coverUrl: null, rank: 0, isrc: null,
+    id, title, artist, album: null, coverUrl: null, rank: 0,
     releaseDate, previewUrl: "https://example.test/p.m4a", playable: true,
   });
 
@@ -116,5 +116,20 @@ describe("chartIdsFromFeed", () => {
     expect(chartIdsFromFeed({ feed: { entry: [entry("21"), entry("22")] } })).toEqual(["21", "22"]);
     expect(chartIdsFromFeed({ feed: { entry: entry("31") } })).toEqual(["31"]);
     expect(chartIdsFromFeed({})).toEqual([]);
+  });
+});
+
+describe("releaseFitsYear", () => {
+  it("allows a release up to two years before or one year after", () => {
+    expect(releaseFitsYear("2004-11-02", 2005)).toBe(true);
+    expect(releaseFitsYear("2003-01-01", 2005)).toBe(true);
+    expect(releaseFitsYear("2006-03-01", 2005)).toBe(true);
+    expect(releaseFitsYear("1998-05-05", 2005)).toBe(false);
+    expect(releaseFitsYear("2019-05-05", 2005)).toBe(false);
+  });
+
+  it("gives missing dates the benefit of the doubt", () => {
+    expect(releaseFitsYear(undefined, 2005)).toBe(true);
+    expect(releaseFitsYear("0000-00-00", 2005)).toBe(true);
   });
 });

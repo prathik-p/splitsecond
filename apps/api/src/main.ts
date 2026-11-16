@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 
-// Prisma returns BigInt for Deezer ids; make JSON.stringify not throw if one slips through.
+// Prisma returns BigInt for Apple ids; make JSON.stringify not throw if one slips through.
 (BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
   return this.toString();
 };

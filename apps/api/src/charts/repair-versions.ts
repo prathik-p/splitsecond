@@ -1,8 +1,7 @@
 import type { PrismaClient, Track } from "@prisma/client";
-import type { Catalog, CatalogTrack } from "../catalog/types";
-import { releaseFitsYear } from "../catalog/hits";
-import { findMatches } from "../profiles/match";
-import { leadArtist } from "./billboard-seeder";
+import type { CatalogTrack } from "../catalog/types";
+import { findMatches } from "../catalog/match";
+import { leadArtist, releaseFitsYear } from "./billboard-seeder";
 import { isAlternateTrack } from "./release-rules";
 
 /**
@@ -22,7 +21,7 @@ export interface RepairResult {
   stopped: boolean;
 }
 
-type Searchable = Pick<Catalog, "provider"> & { search(title: string, artist: string, limit?: number): Promise<CatalogTrack[]> };
+type Searchable = { search(title: string, artist: string, limit?: number): Promise<CatalogTrack[]> };
 
 /** The title without its brackets and " - …" tail, to search with. */
 const searchTitle = (title: string) =>
@@ -77,7 +76,7 @@ export async function repairVersions(
       log(`"${track.title}" by ${track.artist} (${track.album}): no original recording found, taken out`);
       continue;
     }
-    await swap(prisma, track, original, catalog.provider);
+    await swap(prisma, track, original);
     result.swapped++;
     log(`"${track.title}" by ${track.artist}: now the original from "${original.album}" instead of "${track.album}"`);
   }
@@ -85,8 +84,8 @@ export async function repairVersions(
 }
 
 /** Point a hit at the original recording, or merge it into the row that already holds it. */
-async function swap(prisma: PrismaClient, track: Track, original: CatalogTrack, provider: Catalog["provider"]) {
-  const idField = provider === "deezer" ? { deezerId: BigInt(original.id) } : { itunesId: BigInt(original.id) };
+async function swap(prisma: PrismaClient, track: Track, original: CatalogTrack) {
+  const idField = { itunesId: BigInt(original.id) };
   const holder = await prisma.track.findFirst({ where: { ...idField, id: { not: track.id } } });
   if (holder) {
     // The original is already saved (say, from an artist catalogue): it takes over as the hit.
@@ -119,20 +118,20 @@ async function swap(prisma: PrismaClient, track: Track, original: CatalogTrack, 
       artist: original.artist,
       album: original.album,
       coverUrl: original.coverUrl,
-      previewUrl: provider === "itunes" ? original.previewUrl : track.previewUrl,
+      previewUrl: original.previewUrl,
       genre: track.genre ?? original.genre ?? null,
     },
   });
 }
 
 /**
- * Take a song out for good: delete it, or, when a played run or an imported
- * profile points at it, keep the row out of the pool under a key no seed will
- * match again, so the next seed finds the original instead.
+ * Take a song out for good: delete it, or, when a played run points at it,
+ * keep the row out of the pool under a key no seed will match again, so the
+ * next seed finds the original instead.
  */
 async function retire(prisma: PrismaClient, track: Track) {
   const deleted = await prisma.track.deleteMany({
-    where: { id: track.id, rounds: { none: {} }, guesses: { none: {} }, profiles: { none: {} } },
+    where: { id: track.id, rounds: { none: {} }, guesses: { none: {} } },
   });
   if (deleted.count) return;
   await prisma.trackSource.deleteMany({ where: { trackId: track.id } });

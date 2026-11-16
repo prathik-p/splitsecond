@@ -1,8 +1,7 @@
 import type { PrismaClient, Track } from "@prisma/client";
 import { normalizeArtist, songKey } from "@splitsecond/shared";
 import type { Catalog, CatalogTrack } from "../catalog/types";
-import { findMatches } from "../profiles/match";
-import { releaseFitsYear } from "../catalog/hits";
+import { findMatches } from "../catalog/match";
 import { isAlternateTrack } from "./release-rules";
 import type { ChartEntry, WikipediaCharts } from "./wikipedia-charts";
 
@@ -26,7 +25,18 @@ export interface BillboardResult {
   remaining: number;
 }
 
-/** Chart position as a popularity rank on the scale Deezer uses (higher is easier). */
+/**
+ * Does a release date fit the year a song was a hit? Allows a song released late
+ * one year to peak the next, and rejects later re-recordings and live cuts. A
+ * missing date gets the benefit of the doubt.
+ */
+export function releaseFitsYear(releaseDate: string | undefined, year: number): boolean {
+  const released = Number(releaseDate?.slice(0, 4));
+  if (!released || released < 1900) return true;
+  return released >= year - 2 && released <= year + 1;
+}
+
+/** Chart position as a popularity rank (higher is easier). */
 export const rankForPosition = (position: number) => Math.max(1, 101 - position) * 10_000;
 
 /** The part of a chart credit to search for: "Usher featuring Lil Jon and Ludacris" → "Usher". */
@@ -145,17 +155,16 @@ export async function seedBillboard(
         missed++;
         continue;
       }
-      const idField = hit.provider === "deezer" ? { deezerId: BigInt(hit.id) } : { itunesId: BigInt(hit.id) };
       track =
-        (await prisma.track.findFirst({ where: { OR: [idField, { songKey: songKey(hit.title, hit.artist) }] } })) ??
+        (await prisma.track.findFirst({ where: { OR: [{ itunesId: BigInt(hit.id) }, { songKey: songKey(hit.title, hit.artist) }] } })) ??
         (await prisma.track.create({
           data: {
-            ...idField,
+            itunesId: BigInt(hit.id),
             title: hit.title,
             artist: hit.artist,
             album: hit.album,
             coverUrl: hit.coverUrl,
-            previewUrl: hit.provider === "itunes" ? hit.previewUrl : null,
+            previewUrl: hit.previewUrl,
             genre: hit.genre ?? null,
             rank,
             year,

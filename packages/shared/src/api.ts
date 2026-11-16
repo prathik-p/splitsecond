@@ -6,14 +6,6 @@ export interface PoolTrack {
   artist: string;
 }
 
-/** What the default pool holds, for the lobby. */
-export interface PoolSummary {
-  songs: number;
-  /** Range of hit years in the pool, or null if no song has a year. */
-  yearFrom: number | null;
-  yearTo: number | null;
-}
-
 /**
  * What a run can be limited to, for the lobby's run options. Kept compact:
  * songs point into the two name lists.
@@ -55,29 +47,8 @@ export interface RevealedTrack {
   year: number | null;
 }
 
-export interface ProfileState {
-  id: string;
-  source: "lastfm";
-  displayName: string;
-  status: "pending" | "running" | "done" | "failed";
-  /** Songs found on the source, looked at so far, and matched to a playable track. */
-  total: number;
-  processed: number;
-  matched: number;
-  error: string | null;
-  importedAt: string | null;
-}
-
-/** Where a run's songs come from. null means the default pool. */
-export interface RunSource {
-  profileId: string;
-  displayName: string;
-}
-
 export interface RunState {
   runId: string;
-  nickname: string | null;
-  source: RunSource | null;
   /** The run options it was started with. */
   filters: RunFilters;
   totalScore: number;
@@ -89,11 +60,4 @@ export interface GuessResult {
   correct: boolean;
   round: RoundState;
   run: RunState;
-}
-
-export interface LeaderboardEntry {
-  runId: string;
-  nickname: string;
-  totalScore: number;
-  finishedAt: string;
 }

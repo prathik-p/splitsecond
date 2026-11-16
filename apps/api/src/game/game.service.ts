@@ -2,9 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma, Round, RoundStatus, Track } from "@prisma/client";
 import {
   GuessResult,
-  LeaderboardEntry,
   PoolOptions,
-  PoolSummary,
   PoolTrack,
   RUN_LENGTH,
   RoundState,
@@ -17,14 +15,9 @@ import { PrismaService } from "../prisma/prisma.service";
 import { CatalogService, Clip } from "../catalog/catalog.service";
 import { buildOptions, cleanFilters, matchingKeys } from "./pool-options";
 
-type RoundWithTrack = Round & { track: Track; run: { profiles: { id: string }[] } };
+type RoundWithTrack = Round & { track: Track };
 
-const ROUND_INCLUDE = { track: true, run: { select: { profiles: { select: { id: true } } } } } as const;
-
-/** The songs a run can draw from and be guessed from: its profiles' songs, or the default pool. */
-function poolWhere(profileIds: string[]): Prisma.TrackWhereInput {
-  return profileIds.length ? { profiles: { some: { profileId: { in: profileIds } } } } : { inPool: true };
-}
+const ROUND_INCLUDE = { track: true } as const;
 
 const STATUS: Record<RoundStatus, RoundState["status"]> = {
   PLAYING: "playing",
@@ -40,9 +33,9 @@ export class GameService {
   ) {}
 
   /** Every guessable song, one entry per song even if the pool has several releases. */
-  async pool(profileIds: string[] = []): Promise<PoolTrack[]> {
+  async pool(): Promise<PoolTrack[]> {
     const tracks = await this.prisma.track.findMany({
-      where: poolWhere(profileIds),
+      where: { inPool: true },
       select: { id: true, title: true, artist: true, songKey: true },
       orderBy: { rank: "desc" },
     });
@@ -56,14 +49,6 @@ export class GameService {
     return out.sort((a, b) => a.title.localeCompare(b.title));
   }
 
-  async poolSummary(): Promise<PoolSummary> {
-    const [songs, years] = await Promise.all([
-      this.prisma.track.findMany({ where: { inPool: true }, distinct: ["songKey"], select: { id: true } }),
-      this.prisma.track.aggregate({ where: { inPool: true }, _min: { year: true }, _max: { year: true } }),
-    ]);
-    return { songs: songs.length, yearFrom: years._min.year, yearTo: years._max.year };
-  }
-
   /** The genres and artists the default pool can be narrowed to. */
   async poolOptions(): Promise<PoolOptions> {
     const tracks = await this.prisma.track.findMany({
@@ -74,69 +59,34 @@ export class GameService {
     return buildOptions(tracks).options;
   }
 
+  /** The songs a run's guesses can be picked from: the whole pool, whatever its options. */
   async runPool(runId: string): Promise<PoolTrack[]> {
-    const run = await this.prisma.run.findUnique({
-      where: { id: runId },
-      select: { profiles: { select: { id: true } } },
-    });
+    const run = await this.prisma.run.findUnique({ where: { id: runId }, select: { id: true } });
     if (!run) throw new NotFoundException("Run not found");
-    return this.pool(run.profiles.map((p) => p.id));
+    return this.pool();
   }
 
   /**
    * Pick RUN_LENGTH songs from the pool, ordered easy to hard: the pool is
-   * sorted by Deezer rank and split into RUN_LENGTH bands, one song per band.
-   * With a profile, the pool is that profile's imported songs. Run options narrow
-   * the pool to chosen genres and artists first.
+   * sorted by rank and split into RUN_LENGTH bands, one song per band. Run
+   * options narrow the pool to chosen genres and artists first.
    */
-  async createRun(
-    nickname?: string | null,
-    profileId?: string | null,
-    options: { genres?: unknown; artists?: unknown } = {},
-  ): Promise<RunState> {
+  async createRun(options: { genres?: unknown; artists?: unknown } = {}): Promise<RunState> {
     const filters = cleanFilters(options.genres, options.artists);
     const filtered = filters.genres.length > 0 || filters.artists.length > 0;
-    let profile: { id: string; displayName: string } | null = null;
-    if (profileId) {
-      profile = await this.prisma.profile.findUnique({
-        where: { id: String(profileId) },
-        select: { id: true, displayName: true },
-      });
-      if (!profile) throw new NotFoundException("Profile not found");
-    }
-
     let pool = await this.prisma.track.findMany({
-      where: poolWhere(profile ? [profile.id] : []),
-      select: {
-        id: true,
-        title: true,
-        artist: true,
-        genre: true,
-        songKey: true,
-        catalogOnly: true,
-        rank: true,
-        profiles: profile ? { where: { profileId: profile.id }, select: { playcount: true } } : false,
-      },
+      where: { inPool: true },
+      select: { id: true, title: true, artist: true, genre: true, songKey: true, catalogOnly: true, rank: true },
       orderBy: { rank: "desc" },
     });
-    if (profile) {
-      // Where the catalog gives no popularity (iTunes), the listener's own play count
-      // decides what counts as easy.
-      const plays = (t: (typeof pool)[number]) => t.profiles?.[0]?.playcount ?? 0;
-      pool.sort((a, b) => b.rank - a.rank || plays(b) - plays(a));
-    }
-    if (!profile) {
-      // Also keeps deep cuts out unless their artist was picked.
-      const keys = matchingKeys(buildOptions(pool), filters);
-      pool = pool.filter((t) => keys.has(t.songKey));
-    }
+    // Also keeps deep cuts out unless their artist was picked.
+    const keys = matchingKeys(buildOptions(pool), filters);
+    pool = pool.filter((t) => keys.has(t.songKey));
     const distinct = new Set(pool.map((t) => t.songKey));
     if (distinct.size < RUN_LENGTH) {
       throw new ConflictException(
         filtered
           ? `Only ${distinct.size} ${distinct.size === 1 ? "song matches" : "songs match"} these options. A run needs ${RUN_LENGTH}, so pick more genres or artists.`
-          : profile
-          ? `${profile.displayName} needs at least ${RUN_LENGTH} matched songs to play.`
           : `The song pool needs at least ${RUN_LENGTH} songs. Run the seed first.`,
       );
     }
@@ -154,13 +104,10 @@ export class GameService {
       usedKeys.add(choice.songKey);
     }
 
-    const clean = nickname?.trim().slice(0, 24) || null;
     const run = await this.prisma.run.create({
       data: {
-        nickname: clean,
         genres: filters.genres,
         artists: filters.artists,
-        ...(profile ? { profiles: { connect: { id: profile.id } } } : {}),
         rounds: { create: picked.map((trackId, index) => ({ trackId, index })) },
       },
     });
@@ -170,17 +117,11 @@ export class GameService {
   async getRun(runId: string): Promise<RunState> {
     const run = await this.prisma.run.findUnique({
       where: { id: runId },
-      include: {
-        rounds: { include: ROUND_INCLUDE, orderBy: { index: "asc" } },
-        profiles: { select: { id: true, displayName: true } },
-      },
+      include: { rounds: { include: ROUND_INCLUDE, orderBy: { index: "asc" } } },
     });
     if (!run) throw new NotFoundException("Run not found");
-    const [profile] = run.profiles;
     return {
       runId: run.id,
-      nickname: run.nickname,
-      source: profile ? { profileId: profile.id, displayName: profile.displayName } : null,
       filters: { genres: run.genres, artists: run.artists } satisfies RunFilters,
       totalScore: run.totalScore,
       finished: run.finishedAt !== null,
@@ -216,7 +157,7 @@ export class GameService {
     }
     const round = await this.playableRound(roundId);
     const guessed = await this.prisma.track.findFirst({
-      where: { id: guessedTrackId, ...poolWhere(round.run.profiles.map((p) => p.id)) },
+      where: { id: guessedTrackId, inPool: true },
     });
     if (!guessed) throw new BadRequestException("Pick a song from the list");
 
@@ -251,24 +192,6 @@ export class GameService {
     const round = await this.playableRound(roundId);
     await this.endRound(round, "GIVEN_UP", 0);
     return this.result(false, round.id, round.runId);
-  }
-
-  /** Best finished runs on the default pool, or on one profile's songs. */
-  async leaderboard(limit = 20, profileId?: string): Promise<LeaderboardEntry[]> {
-    const runs = await this.prisma.run.findMany({
-      where: {
-        finishedAt: { not: null },
-        profiles: profileId ? { some: { id: profileId } } : { none: {} },
-      },
-      orderBy: [{ totalScore: "desc" }, { finishedAt: "asc" }],
-      take: limit,
-    });
-    return runs.map((r) => ({
-      runId: r.id,
-      nickname: r.nickname ?? "Anonymous",
-      totalScore: r.totalScore,
-      finishedAt: r.finishedAt!.toISOString(),
-    }));
   }
 
   // --- helpers ---
