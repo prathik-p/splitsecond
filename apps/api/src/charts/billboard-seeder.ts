@@ -3,6 +3,7 @@ import { normalizeArtist, songKey } from "@splitsecond/shared";
 import type { Catalog, CatalogTrack } from "../catalog/types";
 import { findMatches } from "../profiles/match";
 import { releaseFitsYear } from "../catalog/hits";
+import { isAlternateTrack } from "./release-rules";
 import type { ChartEntry, WikipediaCharts } from "./wikipedia-charts";
 
 export interface BillboardOptions {
@@ -55,7 +56,9 @@ function nearlySameArtist(a: string, b: string): boolean {
 }
 
 /** The catalog track for a chart entry: right title and artist, ideally released around that year. */
-export function chooseForEntry(entry: ChartEntry, year: number, candidates: CatalogTrack[]): CatalogTrack | null {
+export function chooseForEntry(entry: ChartEntry, year: number, found: CatalogTrack[]): CatalogTrack | null {
+  // Never a live, livestream or remix version, judged by title and by album.
+  const candidates = found.filter((c) => !isAlternateTrack(c));
   const lead = leadArtist(entry.artist);
   let matches = findMatches(entry.title, entry.artist, candidates);
   if (matches.length === 0) matches = findMatches(entry.title, lead, candidates);

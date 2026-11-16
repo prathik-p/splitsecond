@@ -137,7 +137,10 @@ few minutes the first time. When these rules change in a newer version, the next
 clears each artist's songs out and reads them again under the new rules. Take an artist
 out of `artists.txt` and the next seed takes their catalogue out of the pool again (their
 chart hits stay). Songs that leave the pool are deleted from the database, except ones a
-played run points at, which stay with `inPool` false. These songs are marked `catalogOnly`: they come up only when
+played run points at, which stay with `inPool` false. Chart hits are never matched to a
+version whose title or album marks it as live, a livestream or a remix, and each seed
+swaps any such song already in the pool for the original recording (or takes it out when
+Apple has no original). These songs are marked `catalogOnly`: they come up only when
 their artist is picked under Run options, so an "All artists" run stays on the hits. A
 song that is also a chart hit counts as a hit. Apple gives no popularity figure, so the
 order its search lists an artist's songs in stands in for it when a run goes easy to hard.

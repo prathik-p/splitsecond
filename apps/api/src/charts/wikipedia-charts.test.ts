@@ -81,6 +81,17 @@ describe("matching chart entries to the catalog", () => {
     expect(chooseForEntry(entry, 2009, [song("1", "Love Story", "Taylor Swift", "2021-02-12T08:00:00Z")])?.id).toBe("1");
   });
 
+  it("never picks a live or livestream version, by title or by album", () => {
+    const entry = { position: 1, title: "Stressed Out", artist: "Twenty One Pilots" };
+    const onAlbum = (id: string, album: string, releaseDate: string) => ({ ...song(id, "Stressed Out", "twenty one pilots", releaseDate), album });
+    const livestream = onAlbum("1", "Scaled And Icy (Livestream Version)", "2021-05-21T07:00:00Z");
+    const live = { ...song("2", "Stressed Out (Live)", "twenty one pilots", "2016-05-21T07:00:00Z"), album: "Blurryface" };
+    const studio = onAlbum("3", "Blurryface", "2015-05-15T07:00:00Z");
+    expect(chooseForEntry(entry, 2016, [livestream, live, studio])?.id).toBe("3");
+    // Only another version on the catalog: better no song than the wrong recording.
+    expect(chooseForEntry(entry, 2016, [livestream, live])).toBeNull();
+  });
+
   it("ranks the top of the chart as the easiest", () => {
     expect(rankForPosition(1)).toBe(1_000_000);
     expect(rankForPosition(100)).toBe(10_000);

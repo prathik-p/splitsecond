@@ -67,3 +67,8 @@ export function isAlternateRelease(name: string): boolean {
   if (LIVESTREAM.test(bare)) return true;
   return ALTERNATE_RELEASE.test(bare.replace(BRACKETS, " ").trim()) || decorations(bare).some(marksAlternate);
 }
+
+/** True for a saved or found song that is another version, by its own title or by the release it comes from. */
+export function isAlternateTrack(track: { title: string; album?: string | null }): boolean {
+  return isAlternateVersion(track.title) || (!!track.album && isAlternateRelease(track.album));
+}

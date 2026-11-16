@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { songKey } from "@splitsecond/shared";
 import type { ItunesClient } from "../itunes/itunes-client";
 import { rankForPosition } from "./billboard-seeder";
+import { isAlternateTrack } from "./release-rules";
 
 /** Apple's "most played" songs right now. */
 export const APPLE_CHART_URL = "https://rss.applemarketingtools.com/api/v2/us/music/most-played/100/songs.json";
@@ -79,7 +80,7 @@ export async function seedAppleChart(
 
   let saved = 0;
   for (const t of tracks) {
-    if (!t.playable) continue;
+    if (!t.playable || isAlternateTrack(t)) continue;
     const released = Number(t.releaseDate?.slice(0, 4)) || null;
     // Old songs do chart again; keep the pool to the range being seeded.
     if (released !== null && released < options.fromYear) continue;

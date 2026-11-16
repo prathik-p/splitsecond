@@ -3,7 +3,7 @@ import { normalizeArtist, normalizeTitle, songKey } from "@splitsecond/shared";
 import type { CatalogTrack } from "../catalog/types";
 import type { ItunesAlbum, ItunesArtist, ItunesClient } from "../itunes/itunes-client";
 import { sameArtist } from "../profiles/match";
-import { isAlternateRelease, isAlternateVersion } from "./release-rules";
+import { isAlternateRelease, isAlternateTrack, isAlternateVersion } from "./release-rules";
 
 /**
  * Adds the whole catalogue of chosen artists to the pool: the original studio
@@ -312,14 +312,16 @@ async function save(
     // Among several releases of a catalogue song, keep the plain original: an untouched
     // title beats "(Remastered)" or "(X's Version)", the artist alone beats a duet version,
     // and the earliest release beats a later one.
+    // A saved song that is itself a live or livestream version (a hit matched by an older seed) always gives way.
     const better =
-      existing.catalogOnly &&
       existing.itunesId !== BigInt(song.id) &&
-      (isPlain(song.title) !== isPlain(existing.title)
-        ? isPlain(song.title)
-        : solo(song.artist) !== solo(existing.artist)
-          ? solo(song.artist)
-          : (yearOf(song) ?? Infinity) < (existing.year ?? Infinity));
+      (isAlternateTrack(existing) ||
+        (existing.catalogOnly &&
+          (isPlain(song.title) !== isPlain(existing.title)
+            ? isPlain(song.title)
+            : solo(song.artist) !== solo(existing.artist)
+              ? solo(song.artist)
+              : (yearOf(song) ?? Infinity) < (existing.year ?? Infinity))));
     const taken = better ? await prisma.track.findUnique({ where: { itunesId: BigInt(song.id) } }) : null;
     await prisma.track.update({
       where: { id: existing.id },

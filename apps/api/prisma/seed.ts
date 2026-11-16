@@ -12,6 +12,7 @@
  *   - Apple's current chart, which covers the year in progress
  *   - each song's genre, for the lobby's run options (filled in for older songs too)
  *   - every song by the artists listed in artists.txt (at the top of the project)
+ *   - a fix for any song in the pool that is a live, livestream or remix version
  *   Apple allows about 20 lookups a minute, so a full seed takes around an hour.
  *   It works down the charts across all years at once: stop it whenever you
  *   like and the pool is already playable; run it again to continue.
@@ -33,6 +34,7 @@ import { activeProvider } from "../src/catalog/catalog.service";
 import { seedHits } from "../src/catalog/hits-seeder";
 import { seedAppleChart } from "../src/charts/apple-chart";
 import { parseArtistsFile, seedArtists } from "../src/charts/artist-seeder";
+import { repairVersions } from "../src/charts/repair-versions";
 import { seedBillboard } from "../src/charts/billboard-seeder";
 import { fillGenres } from "../src/charts/genres";
 import { WikipediaCharts } from "../src/charts/wikipedia-charts";
@@ -73,6 +75,13 @@ async function seedFromItunes() {
       console.log(`  Stopped: ${(err as Error).message}. The next seed continues.`);
     }
   }
+
+  // Older seeds could match a hit to a live or livestream version; swap those for the original.
+  const repair = await repairVersions(prisma, itunes, { log: indent });
+  if (repair.swapped || repair.removed) {
+    console.log(`  ${repair.swapped} switched to the original recording, ${repair.removed} taken out.`);
+  }
+  if (repair.stopped) console.log("  Apple is refusing lookups; the next seed finishes this.");
 
   console.log("Adding Apple's current chart…");
   try {
